@@ -1012,6 +1012,11 @@ import streamlit as st
 import os
 import requests
 
+import streamlit as st
+import os
+import requests
+import json
+
 # ======================================================
 # ASISTENTE INTELIGENTE DEL PORTAFOLIO
 # ======================================================
@@ -1026,7 +1031,7 @@ if not st.session_state.get("analysis_done", False):
 # =========================
 # CONFIGURACIÓN GEMINI
 # =========================
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY")
 
 if not GEMINI_API_KEY:
     st.warning("El asistente requiere una API Key válida de Gemini.")
@@ -1037,6 +1042,10 @@ GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{MODEL}:generateContent?key={GEMINI_API_KEY}"
 )
+
+HEADERS = {
+    "Content-Type": "application/json"
+}
 
 # =========================
 # HISTORIAL DE CHAT
@@ -1086,68 +1095,63 @@ if user_question:
     )
 
     # =========================
-    # PROMPT OPTIMIZADO (CLARO, NO CORTA)
+    # PROMPT OPTIMIZADO
     # =========================
     prompt = f"""
 Eres un analista financiero profesional.
 
-Información disponible (úsala SOLO si es relevante para la pregunta):
+Responde SOLO a lo que el usuario pregunta.
+Sé claro para personas no técnicas.
+Extensión media (ni corto ni largo).
+No inventes datos.
 
-Activos analizados:
+Activos:
 {', '.join(results['tickers'])}
-
-Resumen de activos:
-{asset_text}
-
-Comparación de estrategias:
-{strategy_text}
 
 Estrategia recomendada:
 {best_strategy}
 
-Pesos del portafolio recomendado:
+Pesos del portafolio:
 {weights_text}
 
-REGLAS OBLIGATORIAS:
-- Responde exactamente lo que el usuario pregunta.
-- Sé claro para personas no técnicas.
-- Profundidad media: ni muy corto ni muy extenso.
-- No repitas todo el contexto si no es necesario.
-- No inventes datos.
-- No cortes la respuesta.
-- Máximo 4–6 párrafos cortos o bullets claros.
-
-Pregunta del usuario:
+Pregunta:
 {user_question}
 """
 
     payload = {
         "contents": [
             {
-                "role": "user",
                 "parts": [{"text": prompt}]
             }
         ],
         "generationConfig": {
             "temperature": 0.35,
-            "maxOutputTokens": 900,   # 🔹 evita cortes
+            "maxOutputTokens": 900,
             "topP": 0.9
         }
     }
 
-    response = requests.post(GEMINI_URL, json=payload)
-
-    if response.status_code != 200:
-        answer = "⚠️ Error al generar respuesta con Gemini."
-    else:
-        data = response.json()
-        answer = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-            .strip()
+    try:
+        response = requests.post(
+            GEMINI_URL,
+            headers=HEADERS,
+            json=payload,
+            timeout=20
         )
+
+        if response.status_code != 200:
+            answer = (
+                "⚠️ Gemini no respondió correctamente.\n\n"
+                f"Detalle: {response.text}"
+            )
+        else:
+            data = response.json()
+            answer = (
+                data["candidates"][0]["content"]["parts"][0]["text"]
+            )
+
+    except Exception as e:
+        answer = f"⚠️ Error de conexión con Gemini: {e}"
 
     st.session_state.chat_messages.append(
         {"role": "assistant", "content": answer}
@@ -1155,6 +1159,8 @@ Pregunta del usuario:
 
     with st.chat_message("assistant"):
         st.markdown(answer)
+
+
 
 
 
