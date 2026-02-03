@@ -1008,74 +1008,90 @@ if st.session_state.analysis_done:
     st.dataframe(df_retornos)
 
 
-# ======================================================
-# ASISTENTE INTELIGENTE DEL PORTAFOLIO (GEMINI)
-# ======================================================
-
 import streamlit as st
-import google.generativeai as genai
 import os
+import requests
+
+# ======================================================
+# ASISTENTE INTELIGENTE DEL PORTAFOLIO
+# ======================================================
 
 st.divider()
 st.subheader("🤖 Asistente inteligente del portafolio")
 
 if not st.session_state.get("analysis_done", False):
     st.info("Ejecuta primero la optimización para habilitar el asistente.")
-else:
-    if not os.getenv("GEMINI_API_KEY"):
-        st.warning("El asistente requiere una API Key válida de Gemini.")
-    else:
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+    st.stop()
 
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            generation_config={
-                "temperature": 0.35,
-                "max_output_tokens": 700,   # 🔹 suficiente para explicar sin cortar
-                "top_p": 0.9,
-                "top_k": 40
-            }
-        )
+# =========================
+# CONFIGURACIÓN GEMINI
+# =========================
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-        if "chat_messages" not in st.session_state:
-            st.session_state.chat_messages = []
+if not GEMINI_API_KEY:
+    st.warning("El asistente requiere una API Key válida de Gemini.")
+    st.stop()
 
-        for msg in st.session_state.chat_messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+MODEL = "gemini-1.5-flash"
+GEMINI_URL = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/"
+    f"{MODEL}:generateContent?key={GEMINI_API_KEY}"
+)
 
-        user_question = st.chat_input(
-            "Pregunta sobre el portafolio, riesgos o activos"
-        )
+# =========================
+# HISTORIAL DE CHAT
+# =========================
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = []
 
-        if user_question:
-            st.session_state.chat_messages.append(
-                {"role": "user", "content": user_question}
-            )
+for msg in st.session_state.chat_messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-            results = st.session_state.analysis_results
+# =========================
+# INPUT DEL USUARIO
+# =========================
+user_question = st.chat_input(
+    "Pregunta sobre el portafolio, riesgos o activos"
+)
 
-            best_strategy = results["best"]
-            weights = results["weights"][best_strategy]
+if user_question:
+    st.session_state.chat_messages.append(
+        {"role": "user", "content": user_question}
+    )
 
-            weights_text = "\n".join(
-                [f"- {k}: {v:.2%}" for k, v in weights.items()]
-            )
+    results = st.session_state.analysis_results
 
-            asset_text = "\n".join(
-                [f"- {k}: retorno {v['retorno_anual']:.2%}, volatilidad {v['volatilidad']:.2%}"
-                 for k, v in results["asset_summary"].items()]
-            )
+    # =========================
+    # CONTEXTO FINANCIERO
+    # =========================
+    best_strategy = results["best"]
+    weights = results["weights"][best_strategy]
 
-            strategy_text = "\n".join(
-                [f"- {k}: retorno {v['retorno']:.2%}, volatilidad {v['volatilidad']:.2%}, Sharpe {v['sharpe']:.2f}"
-                 for k, v in results["strategy_summary"].items()]
-            )
+    weights_text = "\n".join(
+        f"- {k}: {v:.2%}" for k, v in weights.items()
+    )
 
-            prompt = f"""
+    asset_text = "\n".join(
+        f"- {k}: retorno {v['retorno_anual']:.2%}, volatilidad {v['volatilidad']:.2%}"
+        for k, v in results["asset_summary"].items()
+    )
+
+    strategy_text = "\n".join(
+        f"- {k}: retorno {v['retorno']:.2%}, "
+        f"volatilidad {v['volatilidad']:.2%}, "
+        f"Sharpe {v['sharpe']:.2f}, "
+        f"drawdown {v['drawdown']:.2%}"
+        for k, v in results["strategy_summary"].items()
+    )
+
+    # =========================
+    # PROMPT OPTIMIZADO (CLARO, NO CORTA)
+    # =========================
+    prompt = f"""
 Eres un analista financiero profesional.
 
-Información disponible (úsala solo si es relevante para la pregunta):
+Información disponible (úsala SOLO si es relevante para la pregunta):
 
 Activos analizados:
 {', '.join(results['tickers'])}
@@ -1092,29 +1108,55 @@ Estrategia recomendada:
 Pesos del portafolio recomendado:
 {weights_text}
 
-REGLAS CLARAS:
+REGLAS OBLIGATORIAS:
 - Responde exactamente lo que el usuario pregunta.
-- Explica de forma clara para personas no técnicas.
-- Profundidad media (ni muy corto ni muy largo).
-- Usa ejemplos simples si ayudan.
-- No repitas todo el contexto.
+- Sé claro para personas no técnicas.
+- Profundidad media: ni muy corto ni muy extenso.
+- No repitas todo el contexto si no es necesario.
 - No inventes datos.
-- Termina siempre la respuesta (no la cortes).
-- Máximo 6 párrafos cortos o bullets.
+- No cortes la respuesta.
+- Máximo 4–6 párrafos cortos o bullets claros.
 
 Pregunta del usuario:
 {user_question}
 """
 
-            response = model.generate_content(prompt)
-            answer = response.text.strip()
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": prompt}]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.35,
+            "maxOutputTokens": 900,   # 🔹 evita cortes
+            "topP": 0.9
+        }
+    }
 
-            st.session_state.chat_messages.append(
-                {"role": "assistant", "content": answer}
-            )
+    response = requests.post(GEMINI_URL, json=payload)
 
-            with st.chat_message("assistant"):
-                st.markdown(answer)
+    if response.status_code != 200:
+        answer = "⚠️ Error al generar respuesta con Gemini."
+    else:
+        data = response.json()
+        answer = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+            .strip()
+        )
+
+    st.session_state.chat_messages.append(
+        {"role": "assistant", "content": answer}
+    )
+
+    with st.chat_message("assistant"):
+        st.markdown(answer)
+
+
 
 
 
