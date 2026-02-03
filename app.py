@@ -1009,7 +1009,7 @@ if st.session_state.analysis_done:
 
 
 # ======================================================
-# ASISTENTE INTELIGENTE
+# ASISTENTE INTELIGENTE DEL PORTAFOLIO (GEMINI)
 # ======================================================
 
 st.divider()
@@ -1019,11 +1019,12 @@ if not st.session_state.analysis_done:
     st.info("Ejecuta primero la optimización para habilitar el asistente.")
 else:
     import requests
+    import os
 
     # =========================
-    # CONFIG GEMINI
+    # CONFIGURACIÓN GEMINI
     # =========================
-    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 
     if not GEMINI_API_KEY:
         st.warning("El asistente requiere una API Key válida de Gemini.")
@@ -1036,14 +1037,17 @@ else:
     )
 
     # =========================
-    # MOSTRAR HISTORIAL
+    # HISTORIAL DE CHAT
     # =========================
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+
     for msg in st.session_state.chat_messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
     user_question = st.chat_input(
-        "Pregunta sobre los activos, riesgos o el portafolio recomendado"
+        "Pregunta sobre los tickers, riesgos o el portafolio recomendado"
     )
 
     if user_question:
@@ -1054,7 +1058,7 @@ else:
         results = st.session_state.analysis_results
 
         # =========================
-        # CONTEXTO DEL MODELO
+        # CONTEXTO FINANCIERO
         # =========================
         best_strategy = results["best"]
         weights_dict = results["weights"][best_strategy]
@@ -1077,35 +1081,33 @@ else:
             for k, v in results["strategy_summary"].items()
         )
 
+        # =========================
+        # PROMPT OPTIMIZADO
+        # =========================
         system_prompt = f"""
-Eres un analista financiero profesional.
+Actúa como un analista financiero profesional.
 
-Activos analizados:
-{', '.join(results['tickers'])}
+CONTEXTO (úsalo solo si es necesario):
+Activos analizados: {', '.join(results['tickers'])}
 
-Resumen cuantitativo de activos:
+Resumen de activos:
 {asset_text}
 
-Comparación de estrategias:
+Resumen de estrategias:
 {strategy_text}
 
-Portafolio recomendado:
-{results['best']}
-
-Pesos óptimos del portafolio recomendado:
+Estrategia recomendada: {best_strategy}
+Pesos del portafolio recomendado:
 {weights_text}
 
-INSTRUCCIONES OBLIGATORIAS:
-- Usa únicamente la información proporcionada.
-- No inventes datos ni supongas escenarios no calculados.
-- Explica en lenguaje claro para personas no técnicas.
-- Estructura SIEMPRE la respuesta así:
-  1. Explicación general
-  2. Interpretación del riesgo
-  3. Distribución del capital (si aplica)
-  4. Riesgos clave
-  5. Conclusión final clara
-- No dejes frases incompletas.
+INSTRUCCIONES ESTRICTAS:
+- Responde ÚNICAMENTE la pregunta del usuario.
+- No expliques teoría si no es necesaria.
+- Si preguntan por montos, responde con cifras claras.
+- Sé directo, conciso y completo.
+- No repitas información irrelevante.
+- No inventes datos.
+- Termina siempre la respuesta.
 """
 
         # =========================
@@ -1116,21 +1118,24 @@ INSTRUCCIONES OBLIGATORIAS:
                 {
                     "role": "user",
                     "parts": [
-                        {"text": system_prompt},
-                        {"text": user_question}
+                        {
+                            "text": system_prompt
+                            + "\n\nPregunta del usuario:\n"
+                            + user_question
+                        }
                     ]
                 }
             ],
             "generationConfig": {
-                "temperature": 0.25,
-                "maxOutputTokens": 800
+                "temperature": 0.2,
+                "maxOutputTokens": 900
             }
         }
 
         response = requests.post(GEMINI_URL, json=payload)
 
         if response.status_code != 200:
-            answer = "⚠️ Error al generar respuesta con Gemini."
+            answer = "⚠️ Error al generar la respuesta con Gemini."
         else:
             data = response.json()
             answer = (
@@ -1146,6 +1151,8 @@ INSTRUCCIONES OBLIGATORIAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
+
 
 
 
