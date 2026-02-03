@@ -1017,7 +1017,7 @@ import google.generativeai as genai
 import os
 
 st.divider()
-st.subheader("Asistente inteligente del portafolio")
+st.subheader("🤖 Asistente inteligente del portafolio")
 
 if not st.session_state.get("analysis_done", False):
     st.info("Ejecuta primero la optimización para habilitar el asistente.")
@@ -1030,8 +1030,8 @@ else:
         model = genai.GenerativeModel(
             model_name="gemini-1.5-flash",
             generation_config={
-                "temperature": 0.3,
-                "max_output_tokens": 450,
+                "temperature": 0.35,
+                "max_output_tokens": 700,   # 🔹 suficiente para explicar sin cortar
                 "top_p": 0.9,
                 "top_k": 40
             }
@@ -1058,40 +1058,51 @@ else:
             best_strategy = results["best"]
             weights = results["weights"][best_strategy]
 
-            weights_text = ", ".join(
-                [f"{k}: {v:.2%}" for k, v in weights.items()]
+            weights_text = "\n".join(
+                [f"- {k}: {v:.2%}" for k, v in weights.items()]
             )
 
-            asset_text = "; ".join(
-                [f"{k} (ret {v['retorno_anual']:.2%}, vol {v['volatilidad']:.2%})"
+            asset_text = "\n".join(
+                [f"- {k}: retorno {v['retorno_anual']:.2%}, volatilidad {v['volatilidad']:.2%}"
                  for k, v in results["asset_summary"].items()]
             )
 
-            strategy_text = "; ".join(
-                [f"{k} (ret {v['retorno']:.2%}, vol {v['volatilidad']:.2%}, Sharpe {v['sharpe']:.2f})"
+            strategy_text = "\n".join(
+                [f"- {k}: retorno {v['retorno']:.2%}, volatilidad {v['volatilidad']:.2%}, Sharpe {v['sharpe']:.2f}"
                  for k, v in results["strategy_summary"].items()]
             )
 
             prompt = f"""
 Eres un analista financiero profesional.
 
-Contexto disponible:
-Activos: {', '.join(results['tickers'])}
-Resumen activos: {asset_text}
-Estrategias: {strategy_text}
-Estrategia recomendada: {best_strategy}
-Pesos recomendados: {weights_text}
+Información disponible (úsala solo si es relevante para la pregunta):
 
-Instrucciones estrictas:
-- Responde SOLO la pregunta del usuario.
-- Modo resumen.
-- Máximo 3 párrafos.
+Activos analizados:
+{', '.join(results['tickers'])}
+
+Resumen de activos:
+{asset_text}
+
+Comparación de estrategias:
+{strategy_text}
+
+Estrategia recomendada:
+{best_strategy}
+
+Pesos del portafolio recomendado:
+{weights_text}
+
+REGLAS CLARAS:
+- Responde exactamente lo que el usuario pregunta.
+- Explica de forma clara para personas no técnicas.
+- Profundidad media (ni muy corto ni muy largo).
+- Usa ejemplos simples si ayudan.
 - No repitas todo el contexto.
 - No inventes datos.
-- Lenguaje claro.
-- No cortes la respuesta.
+- Termina siempre la respuesta (no la cortes).
+- Máximo 6 párrafos cortos o bullets.
 
-Pregunta:
+Pregunta del usuario:
 {user_question}
 """
 
@@ -1104,6 +1115,8 @@ Pregunta:
 
             with st.chat_message("assistant"):
                 st.markdown(answer)
+
+
 
 
 
