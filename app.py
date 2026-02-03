@@ -1109,8 +1109,14 @@ INSTRUCCIONES ESTRICTAS:
 - Si aplica, menciona brevemente riesgo y retorno.
 - Si preguntan por cifras, usa números concretos.
 - No inventes datos.
-- Termina siempre la respuesta."""
-
+- Termina siempre la respuesta.
+""".format(
+    tickers=", ".join(results["tickers"]),
+    asset_text=asset_text,
+    strategy_text=strategy_text,
+    best_strategy=best_strategy,
+    weights_text=weights_text
+)
         # =========================
         # LLAMADA A GEMINI
         # =========================
@@ -1152,6 +1158,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
