@@ -1019,7 +1019,6 @@ if not st.session_state.analysis_done:
     st.info("Ejecuta primero la optimización para habilitar el asistente.")
 else:
     import requests
-    import os
 
     # =========================
     # CONFIG GEMINI
@@ -1044,7 +1043,7 @@ else:
             st.markdown(msg["content"])
 
     user_question = st.chat_input(
-        "Pregunta sobre los tickers, riesgos o el portafolio recomendado"
+        "Pregunta sobre los activos, riesgos o el portafolio recomendado"
     )
 
     if user_question:
@@ -1096,11 +1095,17 @@ Portafolio recomendado:
 Pesos óptimos del portafolio recomendado:
 {weights_text}
 
-Reglas estrictas:
-- Usa únicamente esta información.
-- Interpreta riesgo, retorno y trade-offs.
-- No inventes datos.
-- Explica en lenguaje claro para usuarios no técnicos.
+INSTRUCCIONES OBLIGATORIAS:
+- Usa únicamente la información proporcionada.
+- No inventes datos ni supongas escenarios no calculados.
+- Explica en lenguaje claro para personas no técnicas.
+- Estructura SIEMPRE la respuesta así:
+  1. Explicación general
+  2. Interpretación del riesgo
+  3. Distribución del capital (si aplica)
+  4. Riesgos clave
+  5. Conclusión final clara
+- No dejes frases incompletas.
 """
 
         # =========================
@@ -1117,8 +1122,8 @@ Reglas estrictas:
                 }
             ],
             "generationConfig": {
-                "temperature": 0.3,
-                "maxOutputTokens": 500
+                "temperature": 0.25,
+                "maxOutputTokens": 800
             }
         }
 
