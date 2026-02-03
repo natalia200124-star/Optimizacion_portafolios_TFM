@@ -1101,13 +1101,15 @@ Pesos del portafolio recomendado:
 
 INSTRUCCIONES ESTRICTAS:
 - Responde ÚNICAMENTE la pregunta del usuario.
-- No expliques teoría si no es necesaria.
-- Si preguntan por montos, responde con cifras claras.
-- Sé directo, conciso y completo.
-- No repitas información irrelevante.
+- Usa lenguaje claro para personas no técnicas.
+- La respuesta DEBE tener al menos 2 párrafos cortos.
+- Máximo 4 párrafos en total.
+- Cada párrafo debe aportar información distinta (no repetir ideas).
+- No expliques teoría financiera innecesaria.
+- Si aplica, menciona brevemente riesgo y retorno.
+- Si preguntan por cifras, usa números concretos.
 - No inventes datos.
 - Termina siempre la respuesta.
-"""
 
         # =========================
         # LLAMADA A GEMINI
@@ -1126,7 +1128,7 @@ INSTRUCCIONES ESTRICTAS:
                 }
             ],
             "generationConfig": {
-                "temperature": 0.2,
+                "temperature": 0.3,
                 "maxOutputTokens": 900
             }
         }
@@ -1150,6 +1152,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
