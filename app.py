@@ -1007,110 +1007,150 @@ if st.session_state.analysis_done:
     st.subheader("Ratio / retorno esperado por estrategia")
     st.dataframe(df_retornos)
 
-
-import streamlit as st
-import google.generativeai as genai
-import os
+# ======================================================
+# ASISTENTE INTELIGENTE DEL PORTAFOLIO (GEMINI)
+# ======================================================
 
 st.divider()
 st.subheader("🤖 Asistente inteligente del portafolio")
 
-if not st.session_state.get("analysis_done", False):
+if not st.session_state.analysis_done:
     st.info("Ejecuta primero la optimización para habilitar el asistente.")
 else:
-    if not os.getenv("GEMINI_API_KEY"):
+    import requests
+    import os
+
+    # =========================
+    # CONFIGURACIÓN GEMINI
+    # =========================
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+
+    if not GEMINI_API_KEY:
         st.warning("El asistente requiere una API Key válida de Gemini.")
-    else:
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        st.stop()
 
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            generation_config={
-                "temperature": 0.35,
-                "max_output_tokens": 700,   # 🔹 suficiente para explicar sin cortar
-                "top_p": 0.9,
-                "top_k": 40
-            }
+    MODEL = "gemini-2.5-flash-lite"
+    GEMINI_URL = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{MODEL}:generateContent?key={GEMINI_API_KEY}"
+    )
+
+    # =========================
+    # HISTORIAL DE CHAT
+    # =========================
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    user_question = st.chat_input(
+        "Pregunta sobre los tickers, riesgos o el portafolio recomendado"
+    )
+
+    if user_question:
+        st.session_state.chat_messages.append(
+            {"role": "user", "content": user_question}
         )
 
-        if "chat_messages" not in st.session_state:
-            st.session_state.chat_messages = []
+        results = st.session_state.analysis_results
 
-        for msg in st.session_state.chat_messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+        # =========================
+        # CONTEXTO FINANCIERO
+        # =========================
+        best_strategy = results["best"]
+        weights_dict = results["weights"][best_strategy]
 
-        user_question = st.chat_input(
-            "Pregunta sobre el portafolio, riesgos o activos"
+        weights_text = "\n".join(
+            f"- {k}: {v:.2%}" for k, v in weights_dict.items()
         )
 
-        if user_question:
-            st.session_state.chat_messages.append(
-                {"role": "user", "content": user_question}
-            )
+        asset_text = "\n".join(
+            f"- {k}: retorno anual={v['retorno_anual']:.2%}, "
+            f"volatilidad={v['volatilidad']:.2%}"
+            for k, v in results["asset_summary"].items()
+        )
 
-            results = st.session_state.analysis_results
+        strategy_text = "\n".join(
+            f"- {k}: retorno={v['retorno']:.2%}, "
+            f"volatilidad={v['volatilidad']:.2%}, "
+            f"Sharpe={v['sharpe']:.2f}, "
+            f"drawdown={v['drawdown']:.2%}"
+            for k, v in results["strategy_summary"].items()
+        )
 
-            best_strategy = results["best"]
-            weights = results["weights"][best_strategy]
+        # =========================
+        # PROMPT OPTIMIZADO
+        # =========================
+        system_prompt = f"""
+Actúa como un analista financiero profesional.
 
-            weights_text = "\n".join(
-                [f"- {k}: {v:.2%}" for k, v in weights.items()]
-            )
-
-            asset_text = "\n".join(
-                [f"- {k}: retorno {v['retorno_anual']:.2%}, volatilidad {v['volatilidad']:.2%}"
-                 for k, v in results["asset_summary"].items()]
-            )
-
-            strategy_text = "\n".join(
-                [f"- {k}: retorno {v['retorno']:.2%}, volatilidad {v['volatilidad']:.2%}, Sharpe {v['sharpe']:.2f}"
-                 for k, v in results["strategy_summary"].items()]
-            )
-
-            prompt = f"""
-Eres un analista financiero profesional.
-
-Información disponible (úsala solo si es relevante para la pregunta):
-
-Activos analizados:
-{', '.join(results['tickers'])}
+CONTEXTO (úsalo solo si es necesario):
+Activos analizados: {', '.join(results['tickers'])}
 
 Resumen de activos:
 {asset_text}
 
-Comparación de estrategias:
+Resumen de estrategias:
 {strategy_text}
 
-Estrategia recomendada:
-{best_strategy}
-
+Estrategia recomendada: {best_strategy}
 Pesos del portafolio recomendado:
 {weights_text}
 
-REGLAS CLARAS:
-- Responde exactamente lo que el usuario pregunta.
-- Explica de forma clara para personas no técnicas.
-- Profundidad media (ni muy corto ni muy largo).
-- Usa ejemplos simples si ayudan.
-- No repitas todo el contexto.
+INSTRUCCIONES ESTRICTAS:
+- Responde ÚNICAMENTE la pregunta del usuario.
+- No expliques teoría si no es necesaria.
+- Si preguntan por montos, responde con cifras claras.
+- Sé directo, conciso y completo.
+- No repitas información irrelevante.
 - No inventes datos.
-- Termina siempre la respuesta (no la cortes).
-- Máximo 6 párrafos cortos o bullets.
-
-Pregunta del usuario:
-{user_question}
+- Termina siempre la respuesta.
 """
 
-            response = model.generate_content(prompt)
-            answer = response.text.strip()
+        # =========================
+        # LLAMADA A GEMINI
+        # =========================
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": system_prompt
+                            + "\n\nPregunta del usuario:\n"
+                            + user_question
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 900
+            }
+        }
 
-            st.session_state.chat_messages.append(
-                {"role": "assistant", "content": answer}
+        response = requests.post(GEMINI_URL, json=payload)
+
+        if response.status_code != 200:
+            answer = "⚠️ Error al generar la respuesta con Gemini."
+        else:
+            data = response.json()
+            answer = (
+                data.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [{}])[0]
+                .get("text", "No se obtuvo respuesta.")
             )
 
-            with st.chat_message("assistant"):
-                st.markdown(answer)
+        st.session_state.chat_messages.append(
+            {"role": "assistant", "content": answer}
+        )
+
+        with st.chat_message("assistant"):
+            st.markdown(answer)
+
 
 
 
