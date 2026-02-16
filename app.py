@@ -16,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# CSS PERSONALIZADO PROFESIONAL COMPLETO
+# CSS PERSONALIZADO PROFESIONAL COMPLETO - CORREGIDO
 st.markdown("""
 <style>
     /* Importar fuente moderna */
@@ -58,30 +58,70 @@ st.markdown("""
     
     /* Subtítulos */
     h2 {
-        color: #1E88E5;
-        font-weight: 600;
+        color: #1E88E5 !important;
+        font-weight: 600 !important;
         font-size: 1.8rem !important;
-        margin-top: 2rem;
-        margin-bottom: 1rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 2px solid #1E88E5;
+        margin-top: 2rem !important;
+        margin-bottom: 1rem !important;
+        padding-bottom: 0.5rem !important;
+        border-bottom: 2px solid #1E88E5 !important;
     }
     
     h3 {
-        color: #00ACC1;
-        font-weight: 600;
+        color: #00ACC1 !important;
+        font-weight: 600 !important;
         font-size: 1.4rem !important;
-        margin-top: 1.5rem;
+        margin-top: 1.5rem !important;
     }
     
-    /* Tarjetas de información */
+    /* Tarjetas de información - CORREGIDO */
     .info-card {
-        background: linear-gradient(135deg, #1E2128 0%, #2A2D3A 100%);
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        border-left: 4px solid #1E88E5;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        background: linear-gradient(135deg, #1E2128 0%, #2A2D3A 100%) !important;
+        border-radius: 12px !important;
+        padding: 1.5rem !important;
+        margin: 1rem 0 !important;
+        border-left: 4px solid #1E88E5 !important;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3) !important;
+        color: #E0E0E0 !important;
+    }
+    
+    .info-card p {
+        color: #E0E0E0 !important;
+        line-height: 1.8 !important;
+        margin-bottom: 1rem !important;
+        font-size: 1rem !important;
+    }
+    
+    .info-card ul {
+        color: #E0E0E0 !important;
+        line-height: 1.8 !important;
+        margin-left: 1.5rem !important;
+        margin-bottom: 1rem !important;
+        list-style-type: disc !important;
+    }
+    
+    .info-card li {
+        color: #E0E0E0 !important;
+        margin-bottom: 0.5rem !important;
+        font-size: 1rem !important;
+    }
+    
+    .info-card strong {
+        color: #1E88E5 !important;
+        font-weight: 600 !important;
+    }
+    
+    .info-card ol {
+        color: #E0E0E0 !important;
+        line-height: 1.8 !important;
+        margin-left: 1.5rem !important;
+        margin-bottom: 1rem !important;
+    }
+    
+    .info-card h3 {
+        margin-top: 1.5rem !important;
+        margin-bottom: 1rem !important;
+        color: #00ACC1 !important;
     }
     
     /* Cajas de métricas */
@@ -219,45 +259,6 @@ st.markdown("""
         font-weight: 600;
     }
     
-    /* Estilos para contenido dentro de info-cards */
-    .info-card p {
-        color: #E0E0E0;
-        line-height: 1.8;
-        margin-bottom: 1rem;
-        font-size: 1rem;
-    }
-    
-    .info-card ul {
-        color: #E0E0E0;
-        line-height: 1.8;
-        margin-left: 1.5rem;
-        margin-bottom: 1rem;
-        list-style-type: disc;
-    }
-    
-    .info-card li {
-        color: #E0E0E0;
-        margin-bottom: 0.5rem;
-        font-size: 1rem;
-    }
-    
-    .info-card strong {
-        color: #1E88E5;
-        font-weight: 600;
-    }
-    
-    .info-card ol {
-        color: #E0E0E0;
-        line-height: 1.8;
-        margin-left: 1.5rem;
-        margin-bottom: 1rem;
-    }
-    
-    .info-card h3 {
-        margin-top: 1.5rem;
-        margin-bottom: 1rem;
-    }
-    
     /* Animación de carga */
     @keyframes pulse {
         0%, 100% { opacity: 1; }
@@ -289,18 +290,18 @@ st.title("Optimización de Portafolios – Modelo de Markowitz")
 
 st.markdown("""
 <div class="info-card">
-    <h3 style="margin-top: 0;">🎯 ¿Qué es un ticker?</h3>
-    <p>Un <strong>ticker</strong> es el código con el que se identifica una acción en la bolsa de valores.
+    <h3 style="margin-top: 0; color: #00ACC1 !important;">🎯 ¿Qué es un ticker?</h3>
+    <p style="color: #E0E0E0 !important;">Un <strong style="color: #1E88E5 !important;">ticker</strong> es el código con el que se identifica una acción en la bolsa de valores.
     Cada empresa cotizada tiene un ticker único que permite acceder a su información de mercado.</p>
     
-    <p><strong>Ejemplos comunes:</strong></p>
-    <ul>
-        <li><strong>AAPL</strong> → Apple Inc.</li>
-        <li><strong>MSFT</strong> → Microsoft Corporation</li>
-        <li><strong>GOOGL</strong> → Alphabet (Google)</li>
+    <p style="color: #E0E0E0 !important;"><strong style="color: #1E88E5 !important;">Ejemplos comunes:</strong></p>
+    <ul style="color: #E0E0E0 !important;">
+        <li style="color: #E0E0E0 !important;"><strong style="color: #1E88E5 !important;">AAPL</strong> → Apple Inc.</li>
+        <li style="color: #E0E0E0 !important;"><strong style="color: #1E88E5 !important;">MSFT</strong> → Microsoft Corporation</li>
+        <li style="color: #E0E0E0 !important;"><strong style="color: #1E88E5 !important;">GOOGL</strong> → Alphabet (Google)</li>
     </ul>
     
-    <p>Estos códigos se utilizan para descargar automáticamente los precios históricos
+    <p style="color: #E0E0E0 !important;">Estos códigos se utilizan para descargar automáticamente los precios históricos
     y realizar el análisis financiero del portafolio.</p>
 </div>
 """, unsafe_allow_html=True)
@@ -1015,12 +1016,12 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
             """, unsafe_allow_html=True)
 
             # =====================================================================
-            # 11) FRONTERA EFICIENTE (GRÁFICO MÁS PEQUEÑO)
+            # 11) FRONTERA EFICIENTE (GRÁFICO MÁS PEQUEÑO) - REDUCIDO A 5x3.5
             # =====================================================================
             st.subheader("Frontera eficiente (Retorno vs Volatilidad)")
 
-            # GRÁFICO MÁS PEQUEÑO - 6x4.5
-            fig2, ax2 = plt.subplots(figsize=(6, 4.5))
+            # GRÁFICO REDUCIDO - 5x3.5
+            fig2, ax2 = plt.subplots(figsize=(5, 3.5))
 
             # Frontera eficiente
             ax2.plot(
@@ -1034,7 +1035,7 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
             ax2.scatter(
                     vol_sharpe,
                     ret_sharpe,
-                    s=90,
+                    s=70,
                     marker="o",
                     label="Sharpe Máximo"
             )
@@ -1042,45 +1043,50 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
             ax2.scatter(
                     vol_minvol,
                     ret_minvol,
-                    s=90,
+                    s=70,
                     marker="^",
                     label="Mínima Volatilidad"
             )
             ax2.scatter(
                     vol_equal,
                     ret_equal,
-                    s=90,
+                    s=70,
                     marker="s",
                     label="Pesos Iguales"
             )
-            # Etiquetas de los puntos
+            # Etiquetas de los puntos con tamaño de fuente reducido
             ax2.annotate(
-                    "Sharpe Máximo",
+                    "Sharpe Máx",
                     (vol_sharpe, ret_sharpe),
-                    xytext=(8, 8),
+                    xytext=(5, 5),
                     textcoords="offset points",
-                    fontweight="bold"
+                    fontweight="bold",
+                    fontsize=8
             )
             ax2.annotate(
-                    "Mínima Volatilidad",
+                    "Mín Vol",
                     (vol_minvol, ret_minvol),
-                    xytext=(8, -12),
+                    xytext=(5, -10),
                     textcoords="offset points",
-                    fontweight="bold"
+                    fontweight="bold",
+                    fontsize=8
             )
             ax2.annotate(
                     "Pesos Iguales",
                     (vol_equal, ret_equal),
-                    xytext=(8, 8),
+                    xytext=(5, 5),
                     textcoords="offset points",
-                    fontweight="bold"
+                    fontweight="bold",
+                    fontsize=8
             )
-            # Ejes y título
-            ax2.set_xlabel("Volatilidad anual (riesgo)")
-            ax2.set_ylabel("Retorno anual esperado")
-            ax2.set_title("Frontera eficiente y estrategias comparadas")
-            ax2.legend()
+            # Ejes y título con tamaño reducido
+            ax2.set_xlabel("Volatilidad anual (riesgo)", fontsize=9)
+            ax2.set_ylabel("Retorno anual esperado", fontsize=9)
+            ax2.set_title("Frontera eficiente y estrategias", fontsize=10)
+            ax2.legend(fontsize=8)
             ax2.grid(True, alpha=0.3)
+            ax2.tick_params(labelsize=8)
+            plt.tight_layout()
             st.pyplot(fig2)
 
             st.markdown("""
@@ -1181,7 +1187,7 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
             st.success(f"Portafolio recomendado según comportamiento real ponderado: {best}")
 
             # =====================================================================
-            # 9) PESOS ÓPTIMOS (GRÁFICO MÁS PEQUEÑO)
+            # 9) PESOS ÓPTIMOS (GRÁFICO MÁS PEQUEÑO) - REDUCIDO A 5x3
             # =====================================================================
             st.subheader("Pesos óptimos del portafolio recomendado")
 
@@ -1207,10 +1213,13 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.dataframe(df_weights)
 
-            # --- Gráfico MÁS PEQUEÑO - 6x4 ---
-            fig, ax = plt.subplots(figsize=(6, 4))
+            # --- Gráfico REDUCIDO - 5x3 ---
+            fig, ax = plt.subplots(figsize=(5, 3))
             ax.barh(df_weights["Ticker"], df_weights["Peso"])
-            ax.set_title(f"Composición del portafolio recomendado\n({metodo})")
+            ax.set_title(f"Composición del portafolio\n({metodo})", fontsize=10)
+            ax.set_xlabel("Peso", fontsize=9)
+            ax.tick_params(labelsize=8)
+            plt.tight_layout()
             st.pyplot(fig)
 
             st.markdown(f"""
@@ -1467,26 +1476,3 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
