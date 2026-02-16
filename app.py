@@ -290,18 +290,18 @@ st.title("Optimización de Portafolios – Modelo de Markowitz")
 
 st.markdown("""
 <div class="info-card">
-    <h3 style="margin-top: 0; color: #00ACC1 !important;">🎯 ¿Qué es un ticker?</h3>
-    <p style="color: #E0E0E0 !important;">Un <strong style="color: #1E88E5 !important;">ticker</strong> es el código con el que se identifica una acción en la bolsa de valores.
+    <h3 style="margin-top: 0;">🎯 ¿Qué es un ticker?</h3>
+    <p>Un <strong>ticker</strong> es el código con el que se identifica una acción en la bolsa de valores.
     Cada empresa cotizada tiene un ticker único que permite acceder a su información de mercado.</p>
     
-    <p style="color: #E0E0E0 !important;"><strong style="color: #1E88E5 !important;">Ejemplos comunes:</strong></p>
-    <ul style="color: #E0E0E0 !important;">
-        <li style="color: #E0E0E0 !important;"><strong style="color: #1E88E5 !important;">AAPL</strong> → Apple Inc.</li>
-        <li style="color: #E0E0E0 !important;"><strong style="color: #1E88E5 !important;">MSFT</strong> → Microsoft Corporation</li>
-        <li style="color: #E0E0E0 !important;"><strong style="color: #1E88E5 !important;">GOOGL</strong> → Alphabet (Google)</li>
+    <p><strong>Ejemplos comunes:</strong></p>
+    <ul>
+        <li><strong>AAPL</strong> → Apple Inc.</li>
+        <li><strong>MSFT</strong> → Microsoft Corporation</li>
+        <li><strong>GOOGL</strong> → Alphabet (Google)</li>
     </ul>
     
-    <p style="color: #E0E0E0 !important;">Estos códigos se utilizan para descargar automáticamente los precios históricos
+    <p>Estos códigos se utilizan para descargar automáticamente los precios históricos
     y realizar el análisis financiero del portafolio.</p>
 </div>
 """, unsafe_allow_html=True)
@@ -1020,8 +1020,8 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
             # =====================================================================
             st.subheader("Frontera eficiente (Retorno vs Volatilidad)")
 
-            # GRÁFICO REDUCIDO - 5x3.5
-            fig2, ax2 = plt.subplots(figsize=(5, 3.5))
+            # GRÁFICO REDUCIDO - 4.5x2.5
+            fig2, ax2 = plt.subplots(figsize=(4.5, 2.5))
 
             # Frontera eficiente
             ax2.plot(
@@ -1213,8 +1213,8 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.dataframe(df_weights)
 
-            # --- Gráfico REDUCIDO - 5x3 ---
-            fig, ax = plt.subplots(figsize=(5, 3))
+            # --- Gráfico REDUCIDO - 4.5x2.5 ---
+            fig, ax = plt.subplots(figsize=(4.5, 2.5))
             ax.barh(df_weights["Ticker"], df_weights["Peso"])
             ax.set_title(f"Composición del portafolio\n({metodo})", fontsize=10)
             ax.set_xlabel("Peso", fontsize=9)
