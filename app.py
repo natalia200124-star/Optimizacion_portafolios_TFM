@@ -74,7 +74,7 @@ st.markdown("""
         margin-top: 1.5rem !important;
     }
     
-    /* Tarjetas de información - CORREGIDO */
+    /* Tarjetas de información - CORREGIDO CON SELECTORES MÁS ESPECÍFICOS */
     .info-card {
         background: linear-gradient(135deg, #1E2128 0%, #2A2D3A 100%) !important;
         border-radius: 12px !important;
@@ -82,17 +82,22 @@ st.markdown("""
         margin: 1rem 0 !important;
         border-left: 4px solid #1E88E5 !important;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3) !important;
-        color: #E0E0E0 !important;
     }
     
-    .info-card p {
+    /* Todos los párrafos dentro de info-card */
+    .info-card p,
+    .info-card > p,
+    div.info-card p {
         color: #E0E0E0 !important;
         line-height: 1.8 !important;
         margin-bottom: 1rem !important;
         font-size: 1rem !important;
     }
     
-    .info-card ul {
+    /* Todas las listas dentro de info-card */
+    .info-card ul,
+    .info-card > ul,
+    div.info-card ul {
         color: #E0E0E0 !important;
         line-height: 1.8 !important;
         margin-left: 1.5rem !important;
@@ -100,25 +105,37 @@ st.markdown("""
         list-style-type: disc !important;
     }
     
-    .info-card li {
+    /* Todos los items de lista dentro de info-card */
+    .info-card li,
+    .info-card > ul > li,
+    div.info-card ul li,
+    div.info-card li {
         color: #E0E0E0 !important;
         margin-bottom: 0.5rem !important;
         font-size: 1rem !important;
     }
     
-    .info-card strong {
+    /* Todos los elementos strong dentro de info-card */
+    .info-card strong,
+    .info-card p strong,
+    .info-card li strong,
+    div.info-card strong {
         color: #1E88E5 !important;
         font-weight: 600 !important;
     }
     
-    .info-card ol {
+    /* Listas ordenadas dentro de info-card */
+    .info-card ol,
+    div.info-card ol {
         color: #E0E0E0 !important;
         line-height: 1.8 !important;
         margin-left: 1.5rem !important;
         margin-bottom: 1rem !important;
     }
     
-    .info-card h3 {
+    /* H3 dentro de info-card */
+    .info-card h3,
+    div.info-card h3 {
         margin-top: 1.5rem !important;
         margin-bottom: 1rem !important;
         color: #00ACC1 !important;
@@ -1476,3 +1493,4 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
