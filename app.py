@@ -835,73 +835,182 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
-# MOSTRAR RESULTADOS
+# ======================================================
+# MOSTRAR RESULTADOS (FUERA DEL BOTÓN)
+# ======================================================
+
 if st.session_state.analysis_done:
     results = st.session_state.analysis_results
-    
-    st.markdown("---")
-    st.subheader("📊 Resumen de Estrategias")
-    st.dataframe(results["comparison"], use_container_width=True)
-    
-    st.subheader("⚖️ Pesos del Portafolio Recomendado")
-    st.dataframe(results["weights_recommended"], use_container_width=True)
 
-# ASISTENTE GEMINI
+    st.subheader("Comparación de estrategias")
+    st.dataframe(results["comparison"])
+
+    st.subheader("Pesos del portafolio recomendado")
+    st.dataframe(results["weights_recommended"])
+
+    df_retornos = pd.DataFrame(
+        {
+            "Retorno anual esperado": [
+                results["retornos"]["Sharpe Máximo"],
+                results["retornos"]["Mínima Volatilidad"],
+                results["retornos"]["Pesos Iguales"]
+            ]
+        },
+        index=["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"]
+    )
+
+    st.subheader("Ratio / retorno esperado por estrategia")
+    st.dataframe(df_retornos)
+
+# ======================================================
+# ASISTENTE INTELIGENTE DEL PORTAFOLIO (GEMINI)
+# ======================================================
+
 st.divider()
-st.subheader("🤖 Asistente Inteligente del Portafolio")
+st.subheader("🤖 Asistente inteligente del portafolio")
 
 if not st.session_state.analysis_done:
-    st.info("💡 Ejecuta primero la optimización para habilitar el asistente.")
+    st.info("Ejecuta primero la optimización para habilitar el asistente.")
 else:
     import requests
     import os
-    
+
+    # =========================
+    # CONFIGURACIÓN GEMINI
+    # =========================
     GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-    
-    if GEMINI_API_KEY:
-        MODEL = "gemini-2.0-flash-exp"
-        GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={GEMINI_API_KEY}"
-        
-        for msg in st.session_state.chat_messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-        
-        user_question = st.chat_input("Pregunta sobre el portafolio")
-        
-        if user_question:
-            st.session_state.chat_messages.append({"role": "user", "content": user_question})
-            
-            results = st.session_state.analysis_results
-            best_strategy = results["best"]
-            weights_dict = results["weights"][best_strategy]
-            
-            context = f"""
-Activos: {', '.join(results['tickers'])}
+
+    if not GEMINI_API_KEY:
+        st.warning("El asistente requiere una API Key válida de Gemini.")
+        st.stop()
+
+    MODEL = "gemini-2.5-flash-lite"
+    GEMINI_URL = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{MODEL}:generateContent?key={GEMINI_API_KEY}"
+    )
+
+    # =========================
+    # HISTORIAL DE CHAT
+    # =========================
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    user_question = st.chat_input(
+        "Pregunta sobre los tickers, riesgos o el portafolio recomendado"
+    )
+
+    if user_question:
+        st.session_state.chat_messages.append(
+            {"role": "user", "content": user_question}
+        )
+
+        results = st.session_state.analysis_results
+
+        # =========================
+        # CONTEXTO FINANCIERO
+        # =========================
+        best_strategy = results["best"]
+        weights_dict = results["weights"][best_strategy]
+
+        weights_text = "\n".join(
+            f"- {k}: {v:.2%}" for k, v in weights_dict.items()
+        )
+
+        asset_text = "\n".join(
+            f"- {k}: retorno anual={v['retorno_anual']:.2%}, "
+            f"volatilidad={v['volatilidad']:.2%}"
+            for k, v in results["asset_summary"].items()
+        )
+
+        strategy_text = "\n".join(
+            f"- {k}: retorno={v['retorno']:.2%}, "
+            f"volatilidad={v['volatilidad']:.2%}, "
+            f"Sharpe={v['sharpe']:.2f}, "
+            f"drawdown={v['drawdown']:.2%}"
+            for k, v in results["strategy_summary"].items()
+        )
+
+        # =========================
+        # PROMPT OPTIMIZADO
+        # =========================
+        system_prompt = f"""
+Actúa como un analista financiero profesional.
+
+CONTEXTO (úsalo solo si es necesario):
+Activos analizados: {', '.join(results['tickers'])}
+
+Resumen de activos:
+{asset_text}
+
+Resumen de estrategias:
+{strategy_text}
+
 Estrategia recomendada: {best_strategy}
-Pesos: {', '.join(f"{k}={v:.2%}" for k, v in weights_dict.items())}
-Retorno: {results['retornos'][best_strategy]*100:.2f}%
-Volatilidad: {results['volatilidades'][best_strategy]*100:.2f}%
-"""
-            
-            payload = {
-                "contents": [{"role": "user", "parts": [{"text": f"{context}\n\nPregunta: {user_question}"}]}],
-                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 900}
+Pesos del portafolio recomendado:
+{weights_text}
+
+INSTRUCCIONES ESTRICTAS:
+- Responde ÚNICAMENTE la pregunta del usuario.
+- Usa lenguaje claro para personas no técnicas.
+- La respuesta DEBE tener al menos 2 párrafos cortos.
+- Máximo 4 párrafos en total.
+- Cada párrafo debe aportar información distinta (no repetir ideas).
+- No expliques teoría financiera innecesaria.
+- Si aplica, menciona brevemente riesgo y retorno.
+- Si preguntan por cifras, usa números concretos.
+- No inventes datos.
+- Termina siempre la respuesta.
+""".format(
+    tickers=", ".join(results["tickers"]),
+    asset_text=asset_text,
+    strategy_text=strategy_text,
+    best_strategy=best_strategy,
+    weights_text=weights_text
+)
+        # =========================
+        # LLAMADA A GEMINI
+        # =========================
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": system_prompt
+                            + "\n\nPregunta del usuario:\n"
+                            + user_question
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 900
             }
-            
-            with st.spinner("Pensando..."):
-                response = requests.post(GEMINI_URL, json=payload)
-                
-                if response.status_code == 200:
-                    answer = response.json()["candidates"][0]["content"]["parts"][0]["text"]
-                else:
-                    answer = "⚠️ Error al generar respuesta"
-                
-                st.session_state.chat_messages.append({"role": "assistant", "content": answer})
-                
-                with st.chat_message("assistant"):
-                    st.markdown(answer)
-    else:
-        st.warning("⚙️ Configura GEMINI_API_KEY en secrets")
+        }
 
+        response = requests.post(GEMINI_URL, json=payload)
 
+        if response.status_code != 200:
+            answer = "⚠️ Error al generar la respuesta con Gemini."
+        else:
+            data = response.json()
+            answer = (
+                data.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [{}])[0]
+                .get("text", "No se obtuvo respuesta.")
+            )
+
+        st.session_state.chat_messages.append(
+            {"role": "assistant", "content": answer}
+        )
+
+        with st.chat_message("assistant"):
+            st.markdown(answer)
 
