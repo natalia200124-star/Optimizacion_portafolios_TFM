@@ -307,18 +307,18 @@ st.title("Optimización de Portafolios – Modelo de Markowitz")
 
 st.markdown("""
 <div class="info-card">
-    <h3 style="margin-top: 0;">🎯 ¿Qué es un ticker?</h3>
-    <p>Un <strong>ticker</strong> es el código con el que se identifica una acción en la bolsa de valores.
+    <h3 style="margin-top: 1.5rem !important; margin-bottom: 1rem !important; color: #00ACC1 !important;">🎯 ¿Qué es un ticker?</h3>
+    <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Un <strong style="color: #1E88E5 !important; font-weight: 600 !important;">ticker</strong> es el código con el que se identifica una acción en la bolsa de valores.
     Cada empresa cotizada tiene un ticker único que permite acceder a su información de mercado.</p>
     
-    <p><strong>Ejemplos comunes:</strong></p>
-    <ul>
-        <li><strong>AAPL</strong> → Apple Inc.</li>
-        <li><strong>MSFT</strong> → Microsoft Corporation</li>
-        <li><strong>GOOGL</strong> → Alphabet (Google)</li>
+    <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Ejemplos comunes:</strong></p>
+    <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+        <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">AAPL</strong> → Apple Inc.</li>
+        <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">MSFT</strong> → Microsoft Corporation</li>
+        <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">GOOGL</strong> → Alphabet (Google)</li>
     </ul>
     
-    <p>Estos códigos se utilizan para descargar automáticamente los precios históricos
+    <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Estos códigos se utilizan para descargar automáticamente los precios históricos
     y realizar el análisis financiero del portafolio.</p>
 </div>
 """, unsafe_allow_html=True)
@@ -524,19 +524,19 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Interpretación:</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Interpretación:</strong></p>
                 
-                <p>Este gráfico muestra la evolución histórica de los precios ajustados de cada activo
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Este gráfico muestra la evolución histórica de los precios ajustados de cada activo
                 durante el horizonte temporal seleccionado.</p>
                 
-                <ul>
-                    <li>Tendencias crecientes indican periodos de apreciación del activo.</li>
-                    <li>Periodos de alta pendiente reflejan fases de crecimiento acelerado.</li>
-                    <li>Movimientos bruscos o caídas pronunciadas suelen asociarse a eventos de mercado
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Tendencias crecientes indican periodos de apreciación del activo.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Periodos de alta pendiente reflejan fases de crecimiento acelerado.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Movimientos bruscos o caídas pronunciadas suelen asociarse a eventos de mercado
                       o episodios de alta volatilidad.</li>
                 </ul>
                 
-                <p>Este análisis permite identificar activos con comportamientos más estables
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Este análisis permite identificar activos con comportamientos más estables
                 frente a otros con mayor variabilidad en el tiempo.</p>
             </div>
             """, unsafe_allow_html=True)
@@ -563,37 +563,37 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Cómo interpretar esta tabla:</strong></p>
-                <ul>
-                    <li><strong>Retorno acumulado:</strong> cuánto creció el capital total en el periodo.</li>
-                    <li><strong>Volatilidad:</strong> magnitud de las fluctuaciones (riesgo).</li>
-                    <li><strong>Sharpe:</strong> eficiencia riesgo–retorno.</li>
-                    <li><strong>Máx Drawdown:</strong> peor caída histórica desde un máximo.</li>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Cómo interpretar esta tabla:</strong></p>
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Retorno acumulado:</strong> cuánto creció el capital total en el periodo.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Volatilidad:</strong> magnitud de las fluctuaciones (riesgo).</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Sharpe:</strong> eficiencia riesgo–retorno.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Máx Drawdown:</strong> peor caída histórica desde un máximo.</li>
                 </ul>
                 
-                <p><strong>Interpretación analítica de la comparación de estrategias:</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Interpretación analítica de la comparación de estrategias:</strong></p>
                 
-                <p>Esta tabla sintetiza el desempeño de las distintas estrategias
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Esta tabla sintetiza el desempeño de las distintas estrategias
                 de construcción de portafolios bajo un enfoque riesgo–retorno,
                 permitiendo una evaluación integral y comparativa.</p>
                 
-                <ul>
-                    <li>La estrategia de <strong>Sharpe Máximo</strong> tiende a ofrecer el mayor
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La estrategia de <strong style="color: #1E88E5 !important; font-weight: 600 !important;">Sharpe Máximo</strong> tiende a ofrecer el mayor
                       retorno ajustado por riesgo, aunque suele presentar niveles
                       más elevados de volatilidad y drawdowns en periodos adversos.</li>
-                    <li>La estrategia de <strong>Mínima Volatilidad</strong> prioriza la estabilidad
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La estrategia de <strong style="color: #1E88E5 !important; font-weight: 600 !important;">Mínima Volatilidad</strong> prioriza la estabilidad
                       del capital, reduciendo la exposición a caídas pronunciadas,
                       a costa de un menor potencial de crecimiento.</li>
-                    <li>La estrategia de <strong>Pesos Iguales</strong> actúa como referencia neutral,
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La estrategia de <strong style="color: #1E88E5 !important; font-weight: 600 !important;">Pesos Iguales</strong> actúa como referencia neutral,
                       proporcionando una diversificación básica sin optimización explícita.</li>
                 </ul>
                 
-                <p>La combinación de métricas como retorno anual, volatilidad,
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">La combinación de métricas como retorno anual, volatilidad,
                 Ratio de Sharpe y máximo drawdown permite identificar no solo
                 la estrategia más rentable, sino también la más resiliente
                 frente a escenarios de estrés de mercado.</p>
                 
-                <p>Este análisis respalda decisiones de asignación de activos
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Este análisis respalda decisiones de asignación de activos
                 alineadas con el horizonte temporal y el perfil de riesgo del inversor.</p>
             </div>
             """, unsafe_allow_html=True)
@@ -613,36 +613,36 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Interpretación:</strong></p>
-                <p>Esta gráfica muestra cómo el riesgo <strong>cambia en el tiempo</strong>.</p>
-                <ul>
-                    <li>Picos altos suelen coincidir con periodos de crisis.</li>
-                    <li>Estrategias más estables presentan curvas más suaves.</li>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Interpretación:</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Esta gráfica muestra cómo el riesgo <strong style="color: #1E88E5 !important; font-weight: 600 !important;">cambia en el tiempo</strong>.</p>
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Picos altos suelen coincidir con periodos de crisis.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Estrategias más estables presentan curvas más suaves.</li>
                 </ul>
                 
-                <p>La volatilidad histórica móvil permite analizar cómo
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">La volatilidad histórica móvil permite analizar cómo
                 evoluciona el riesgo del portafolio a lo largo del tiempo,
                 capturando cambios estructurales en el comportamiento del mercado.</p>
                 
-                <ul>
-                    <li>Incrementos abruptos de la volatilidad suelen coincidir
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Incrementos abruptos de la volatilidad suelen coincidir
                       con periodos de crisis financiera o incertidumbre macroeconómica.</li>
-                    <li>Curvas más suaves indican estrategias con mayor estabilidad
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Curvas más suaves indican estrategias con mayor estabilidad
                       y menor sensibilidad a shocks de mercado.</li>
                 </ul>
                 
-                <p>En el análisis comparativo:</p>
-                <ul>
-                    <li>El portafolio de <strong>Sharpe Máximo</strong> presenta picos de
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">En el análisis comparativo:</p>
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">El portafolio de <strong style="color: #1E88E5 !important; font-weight: 600 !important;">Sharpe Máximo</strong> presenta picos de
                       volatilidad más elevados, reflejando una mayor exposición
                       al riesgo en escenarios adversos.</li>
-                    <li>La estrategia de <strong>Mínima Volatilidad</strong> mantiene un perfil
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La estrategia de <strong style="color: #1E88E5 !important; font-weight: 600 !important;">Mínima Volatilidad</strong> mantiene un perfil
                       de riesgo más controlado a lo largo del tiempo.</li>
-                    <li>La asignación de <strong>Pesos Iguales</strong> muestra un comportamiento
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La asignación de <strong style="color: #1E88E5 !important; font-weight: 600 !important;">Pesos Iguales</strong> muestra un comportamiento
                       intermedio, replicando parcialmente la dinámica del mercado.</li>
                 </ul>
                 
-                <p>Este enfoque dinámico del riesgo complementa las métricas
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Este enfoque dinámico del riesgo complementa las métricas
                 estáticas tradicionales y aporta una visión más realista
                 del comportamiento del portafolio.</p>
             </div>
@@ -666,30 +666,30 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Interpretación analítica del Ratio Calmar:</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Interpretación analítica del Ratio Calmar:</strong></p>
                 
-                <p>El Ratio Calmar relaciona el <strong>retorno anual esperado</strong> con el
-                <strong>máximo drawdown histórico</strong>, ofreciendo una medida directa
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">El Ratio Calmar relaciona el <strong style="color: #1E88E5 !important; font-weight: 600 !important;">retorno anual esperado</strong> con el
+                <strong style="color: #1E88E5 !important; font-weight: 600 !important;">máximo drawdown histórico</strong>, ofreciendo una medida directa
                 de la capacidad del portafolio para generar rentabilidad
                 sin incurrir en pérdidas extremas prolongadas.</p>
                 
-                <ul>
-                    <li>Un <strong>Ratio Calmar elevado</strong> indica que la estrategia logra
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Un <strong style="color: #1E88E5 !important; font-weight: 600 !important;">Ratio Calmar elevado</strong> indica que la estrategia logra
                       retornos atractivos manteniendo caídas relativamente controladas.</li>
-                    <li>Valores bajos sugieren que el retorno obtenido no compensa
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Valores bajos sugieren que el retorno obtenido no compensa
                       adecuadamente las pérdidas máximas sufridas.</li>
-                    <li>Esta métrica resulta especialmente relevante para
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Esta métrica resulta especialmente relevante para
                       inversionistas con enfoque conservador o con restricciones
                       estrictas de preservación de capital.</li>
                 </ul>
                 
-                <p>A diferencia del Ratio de Sharpe, el Calmar se centra en el
-                <strong>riesgo extremo observado</strong>, lo que lo convierte en un
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">A diferencia del Ratio de Sharpe, el Calmar se centra en el
+                <strong style="color: #1E88E5 !important; font-weight: 600 !important;">riesgo extremo observado</strong>, lo que lo convierte en un
                 indicador complementario para evaluar la resiliencia del
                 portafolio en periodos de crisis o alta volatilidad.</p>
                 
-                <p>En el contexto del presente análisis, el Ratio Calmar permite
-                identificar qué estrategia ofrece un <strong>mejor equilibrio entre
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">En el contexto del presente análisis, el Ratio Calmar permite
+                identificar qué estrategia ofrece un <strong style="color: #1E88E5 !important; font-weight: 600 !important;">mejor equilibrio entre
                 crecimiento del capital y control de pérdidas severas</strong>,
                 reforzando la robustez del proceso de selección de portafolios.</p>
             </div>
@@ -717,25 +717,25 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Interpretación analítica del Ratio Sortino:</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Interpretación analítica del Ratio Sortino:</strong></p>
                 
-                <p>El Ratio Sortino evalúa el desempeño del portafolio considerando
-                exclusivamente la <strong>volatilidad negativa</strong>, es decir, aquellas
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">El Ratio Sortino evalúa el desempeño del portafolio considerando
+                exclusivamente la <strong style="color: #1E88E5 !important; font-weight: 600 !important;">volatilidad negativa</strong>, es decir, aquellas
                 fluctuaciones que representan pérdidas para el inversor.</p>
                 
-                <ul>
-                    <li>Un <strong>valor más alto de Sortino</strong> indica que la estrategia genera
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Un <strong style="color: #1E88E5 !important; font-weight: 600 !important;">valor más alto de Sortino</strong> indica que la estrategia genera
                       mayor retorno por cada unidad de riesgo a la baja asumida.</li>
-                    <li>A diferencia del Ratio de Sharpe, este indicador <strong>no penaliza
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">A diferencia del Ratio de Sharpe, este indicador <strong style="color: #1E88E5 !important; font-weight: 600 !important;">no penaliza
                       la volatilidad positiva</strong>, lo que lo convierte en una métrica
                       más alineada con la percepción real del riesgo por parte del inversor.</li>
-                    <li>Estrategias con Sortino elevado suelen ser más adecuadas para
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Estrategias con Sortino elevado suelen ser más adecuadas para
                       escenarios de mercado inciertos o para perfiles que priorizan
                       la protección frente a caídas.</li>
                 </ul>
                 
-                <p>En el contexto del análisis comparativo, el Ratio Sortino permite
-                identificar qué estrategia ofrece una <strong>mejor compensación entre
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">En el contexto del análisis comparativo, el Ratio Sortino permite
+                identificar qué estrategia ofrece una <strong style="color: #1E88E5 !important; font-weight: 600 !important;">mejor compensación entre
                 retorno y riesgo negativo</strong>, aportando una visión complementaria
                 y más conservadora al proceso de toma de decisiones.</p>
             </div>
@@ -756,30 +756,30 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Interpretación del comportamiento en periodo de crisis:</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Interpretación del comportamiento en periodo de crisis:</strong></p>
                 
-                <p>Esta visualización muestra el desempeño de las distintas
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Esta visualización muestra el desempeño de las distintas
                 estrategias durante un periodo de estrés sistémico,
                 caracterizado por alta volatilidad y caídas abruptas del mercado.</p>
                 
-                <p>El análisis permite evaluar:</p>
-                <ul>
-                    <li>La <strong>profundidad de la caída</strong> inicial (drawdown).</li>
-                    <li>La <strong>velocidad de recuperación</strong> tras el shock.</li>
-                    <li>La <strong>resiliencia relativa</strong> de cada estrategia ante eventos extremos.</li>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">El análisis permite evaluar:</p>
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La <strong style="color: #1E88E5 !important; font-weight: 600 !important;">profundidad de la caída</strong> inicial (drawdown).</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La <strong style="color: #1E88E5 !important; font-weight: 600 !important;">velocidad de recuperación</strong> tras el shock.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La <strong style="color: #1E88E5 !important; font-weight: 600 !important;">resiliencia relativa</strong> de cada estrategia ante eventos extremos.</li>
                 </ul>
                 
-                <p>Los resultados evidencian que:</p>
-                <ul>
-                    <li>Las estrategias optimizadas para maximizar el retorno
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Los resultados evidencian que:</p>
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Las estrategias optimizadas para maximizar el retorno
                       (como Sharpe Máximo) tienden a experimentar caídas más
                       pronunciadas en el corto plazo.</li>
-                    <li>Las estrategias orientadas a la reducción de riesgo
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Las estrategias orientadas a la reducción de riesgo
                       (Mínima Volatilidad) presentan una mayor capacidad de
                       contención de pérdidas.</li>
                 </ul>
                 
-                <p>Este análisis refuerza la idea de que la eficiencia
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Este análisis refuerza la idea de que la eficiencia
                 riesgo–retorno debe evaluarse no solo en condiciones normales,
                 sino también bajo escenarios adversos.</p>
             </div>
@@ -817,62 +817,62 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <h3>¿Qué es un benchmark?</h3>
+                <h3 style="margin-top: 1.5rem !important; margin-bottom: 1rem !important; color: #00ACC1 !important;">¿Qué es un benchmark?</h3>
 
-                <p>Un <strong>benchmark</strong> es un <strong>punto de referencia</strong> que se utiliza para evaluar si una estrategia de inversión es buena o mala.
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Un <strong style="color: #1E88E5 !important; font-weight: 600 !important;">benchmark</strong> es un <strong style="color: #1E88E5 !important; font-weight: 600 !important;">punto de referencia</strong> que se utiliza para evaluar si una estrategia de inversión es buena o mala.
                 Funciona de forma similar a una <em>regla de medición</em>: permite comparar los resultados obtenidos con una alternativa estándar y ampliamente utilizada en los mercados financieros.</p>
 
-                <p>En este trabajo, los benchmarks representan <strong>formas simples y comunes de invertir</strong>, frente a las cuales se comparan las estrategias optimizadas desarrolladas en la aplicación.</p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">En este trabajo, los benchmarks representan <strong style="color: #1E88E5 !important; font-weight: 600 !important;">formas simples y comunes de invertir</strong>, frente a las cuales se comparan las estrategias optimizadas desarrolladas en la aplicación.</p>
 
-                <h3>¿Qué representa el S&P 500?</h3>
+                <h3 style="margin-top: 1.5rem !important; margin-bottom: 1rem !important; color: #00ACC1 !important;">¿Qué representa el S&P 500?</h3>
 
-                <p>El <strong>S&P 500</strong> es uno de los índices bursátiles más conocidos del mundo. Agrupa a aproximadamente <strong>500 de las empresas más grandes de Estados Unidos</strong>, como Apple, Microsoft o Google.
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">El <strong style="color: #1E88E5 !important; font-weight: 600 !important;">S&P 500</strong> es uno de los índices bursátiles más conocidos del mundo. Agrupa a aproximadamente <strong style="color: #1E88E5 !important; font-weight: 600 !important;">500 de las empresas más grandes de Estados Unidos</strong>, como Apple, Microsoft o Google.
                 Invertir en el S&P 500 se considera una aproximación al comportamiento general del mercado y suele utilizarse como referencia básica para evaluar el desempeño de cualquier portafolio.</p>
 
-                <p>Si una estrategia no logra superar al S&P 500 en el largo plazo, resulta difícil justificar su complejidad frente a una inversión pasiva en el mercado.</p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Si una estrategia no logra superar al S&P 500 en el largo plazo, resulta difícil justificar su complejidad frente a una inversión pasiva en el mercado.</p>
 
-                <h3>¿Qué es el MSCI?</h3>
+                <h3 style="margin-top: 1.5rem !important; margin-bottom: 1rem !important; color: #00ACC1 !important;">¿Qué es el MSCI?</h3>
 
-                <p><strong>MSCI</strong> (Morgan Stanley Capital International) es una empresa internacional que elabora <strong>índices bursátiles</strong> utilizados como referencia en todo el mundo.
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">MSCI</strong> (Morgan Stanley Capital International) es una empresa internacional que elabora <strong style="color: #1E88E5 !important; font-weight: 600 !important;">índices bursátiles</strong> utilizados como referencia en todo el mundo.
                 Un índice MSCI representa el comportamiento de un conjunto amplio de empresas de una región o del mercado global.</p>
 
-                <p>Por ejemplo:</p>
-                <ul>
-                    <li><strong>MSCI World</strong> agrupa empresas grandes y medianas de países desarrollados.</li>
-                    <li><strong>MSCI Emerging Markets</strong> representa mercados emergentes.</li>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Por ejemplo:</p>
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">MSCI World</strong> agrupa empresas grandes y medianas de países desarrollados.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">MSCI Emerging Markets</strong> representa mercados emergentes.</li>
                 </ul>
 
-                <p>Estos índices se utilizan como benchmark porque reflejan el desempeño promedio de mercados completos y permiten evaluar si una estrategia supera o no una inversión diversificada a nivel internacional.</p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Estos índices se utilizan como benchmark porque reflejan el desempeño promedio de mercados completos y permiten evaluar si una estrategia supera o no una inversión diversificada a nivel internacional.</p>
 
-                <h3>¿Qué es el NASDAQ?</h3>
+                <h3 style="margin-top: 1.5rem !important; margin-bottom: 1rem !important; color: #00ACC1 !important;">¿Qué es el NASDAQ?</h3>
 
-                <p>El <strong>NASDAQ</strong> es una bolsa de valores estadounidense caracterizada por una <strong>alta concentración de empresas tecnológicas y de innovación</strong>, como Apple, Microsoft, Amazon o Google.
-                El índice NASDAQ suele mostrar mayores crecimientos en periodos de expansión económica, pero también presenta <strong>mayor volatilidad</strong> en momentos de crisis.</p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">El <strong style="color: #1E88E5 !important; font-weight: 600 !important;">NASDAQ</strong> es una bolsa de valores estadounidense caracterizada por una <strong style="color: #1E88E5 !important; font-weight: 600 !important;">alta concentración de empresas tecnológicas y de innovación</strong>, como Apple, Microsoft, Amazon o Google.
+                El índice NASDAQ suele mostrar mayores crecimientos en periodos de expansión económica, pero también presenta <strong style="color: #1E88E5 !important; font-weight: 600 !important;">mayor volatilidad</strong> en momentos de crisis.</p>
 
-                <p>Por esta razón, el NASDAQ se utiliza como benchmark para comparar estrategias con un perfil más dinámico y orientado al crecimiento, especialmente en sectores tecnológicos.</p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Por esta razón, el NASDAQ se utiliza como benchmark para comparar estrategias con un perfil más dinámico y orientado al crecimiento, especialmente en sectores tecnológicos.</p>
 
-                <h3>¿Por qué se incluyen estos índices como benchmarks?</h3>
+                <h3 style="margin-top: 1.5rem !important; margin-bottom: 1rem !important; color: #00ACC1 !important;">¿Por qué se incluyen estos índices como benchmarks?</h3>
 
-                <p>La inclusión del <strong>S&P 500, MSCI y NASDAQ</strong> permite comparar los portafolios optimizados con:</p>
-                <ul>
-                    <li>El comportamiento general del mercado estadounidense (S&P 500),</li>
-                    <li>Una referencia de diversificación global (MSCI),</li>
-                    <li>Un mercado de alto crecimiento y mayor riesgo (NASDAQ).</li>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">La inclusión del <strong style="color: #1E88E5 !important; font-weight: 600 !important;">S&P 500, MSCI y NASDAQ</strong> permite comparar los portafolios optimizados con:</p>
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">El comportamiento general del mercado estadounidense (S&P 500),</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Una referencia de diversificación global (MSCI),</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Un mercado de alto crecimiento y mayor riesgo (NASDAQ).</li>
                 </ul>
 
-                <p>De esta forma, se obtiene una evaluación más completa del desempeño relativo de las estrategias desarrolladas en la aplicación.</p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">De esta forma, se obtiene una evaluación más completa del desempeño relativo de las estrategias desarrolladas en la aplicación.</p>
 
-                <h3>¿Por qué se comparan varias estrategias?</h3>
+                <h3 style="margin-top: 1.5rem !important; margin-bottom: 1rem !important; color: #00ACC1 !important;">¿Por qué se comparan varias estrategias?</h3>
 
-                <p>Además del S&P 500, se incluyen otras estrategias como:</p>
-                <ul>
-                    <li><strong>Pesos iguales</strong>, donde todos los activos reciben la misma proporción.</li>
-                    <li><strong>Portafolio de mínima volatilidad</strong>, orientado a reducir el riesgo.</li>
-                    <li><strong>Portafolio de Sharpe máximo</strong>, que busca el mejor retorno ajustado por riesgo.</li>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Además del S&P 500, se incluyen otras estrategias como:</p>
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Pesos iguales</strong>, donde todos los activos reciben la misma proporción.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Portafolio de mínima volatilidad</strong>, orientado a reducir el riesgo.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Portafolio de Sharpe máximo</strong>, que busca el mejor retorno ajustado por riesgo.</li>
                 </ul>
 
-                <p>La comparación con estos benchmarks permite responder una pregunta clave:
-                <strong>¿La optimización realmente mejora los resultados frente a alternativas simples y ampliamente utilizadas?</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">La comparación con estos benchmarks permite responder una pregunta clave:
+                <strong style="color: #1E88E5 !important; font-weight: 600 !important;">¿La optimización realmente mejora los resultados frente a alternativas simples y ampliamente utilizadas?</strong></p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -895,18 +895,18 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Cómo interpretar la gráfica de rendimiento acumulado</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Cómo interpretar la gráfica de rendimiento acumulado</strong></p>
 
-                <p>Esta gráfica muestra cómo habría evolucionado una inversión inicial a lo largo del tiempo bajo cada estrategia.</p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Esta gráfica muestra cómo habría evolucionado una inversión inicial a lo largo del tiempo bajo cada estrategia.</p>
 
-                <ul>
-                    <li>La línea que termina <strong>más arriba</strong> representa la estrategia con <strong>mayor crecimiento acumulado</strong>.</li>
-                    <li>Las curvas más <strong>suaves y estables</strong> indican menor volatilidad y menor exposición a crisis.</li>
-                    <li>Caídas pronunciadas reflejan periodos de estrés de mercado; una recuperación rápida indica mayor resiliencia.</li>
-                    <li>Si una estrategia optimizada supera de forma consistente a los benchmarks, se confirma que el modelo aporta valor frente a una inversión pasiva.</li>
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La línea que termina <strong style="color: #1E88E5 !important; font-weight: 600 !important;">más arriba</strong> representa la estrategia con <strong style="color: #1E88E5 !important; font-weight: 600 !important;">mayor crecimiento acumulado</strong>.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Las curvas más <strong style="color: #1E88E5 !important; font-weight: 600 !important;">suaves y estables</strong> indican menor volatilidad y menor exposición a crisis.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Caídas pronunciadas reflejan periodos de estrés de mercado; una recuperación rápida indica mayor resiliencia.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Si una estrategia optimizada supera de forma consistente a los benchmarks, se confirma que el modelo aporta valor frente a una inversión pasiva.</li>
                 </ul>
 
-                <p>La interpretación conjunta del gráfico permite evaluar no solo cuánto se gana, sino <strong>cómo se gana</strong>, identificando estrategias más robustas frente a escenarios adversos.</p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">La interpretación conjunta del gráfico permite evaluar no solo cuánto se gana, sino <strong style="color: #1E88E5 !important; font-weight: 600 !important;">cómo se gana</strong>, identificando estrategias más robustas frente a escenarios adversos.</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -963,19 +963,19 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Interpretación:</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Interpretación:</strong></p>
 
-                <p>El rendimiento acumulado refleja cómo habría evolucionado una inversión inicial
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">El rendimiento acumulado refleja cómo habría evolucionado una inversión inicial
                 en cada activo si se hubiera mantenido durante todo el periodo de análisis.</p>
 
-                <ul>
-                    <li>Curvas más empinadas indican mayor crecimiento del capital.</li>
-                    <li>Activos con mayor volatilidad suelen mostrar trayectorias más irregulares.</li>
-                    <li>Diferencias significativas entre curvas evidencian distintos perfiles
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Curvas más empinadas indican mayor crecimiento del capital.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Activos con mayor volatilidad suelen mostrar trayectorias más irregulares.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Diferencias significativas entre curvas evidencian distintos perfiles
                       de riesgo y rentabilidad.</li>
                 </ul>
 
-                <p>Este gráfico facilita la comparación directa del desempeño histórico
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Este gráfico facilita la comparación directa del desempeño histórico
                 entre los activos analizados.</p>
             </div>
             """, unsafe_allow_html=True)
@@ -988,19 +988,19 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Interpretación:</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Interpretación:</strong></p>
 
-                <p>Este gráfico muestra los retornos porcentuales diarios de cada activo,
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Este gráfico muestra los retornos porcentuales diarios de cada activo,
                 evidenciando la volatilidad de corto plazo.</p>
 
-                <ul>
-                    <li>Picos positivos o negativos representan movimientos abruptos del mercado.</li>
-                    <li>Mayor dispersión implica mayor riesgo.</li>
-                    <li>Periodos de alta concentración de picos suelen coincidir con crisis financieras
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Picos positivos o negativos representan movimientos abruptos del mercado.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Mayor dispersión implica mayor riesgo.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Periodos de alta concentración de picos suelen coincidir con crisis financieras
                       o eventos macroeconómicos relevantes.</li>
                 </ul>
 
-                <p>Este análisis es clave para evaluar el riesgo diario asumido por el inversor.</p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Este análisis es clave para evaluar el riesgo diario asumido por el inversor.</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1016,18 +1016,18 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Interpretación:</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Interpretación:</strong></p>
 
-                <p>Este gráfico muestra el comportamiento diario del retorno del activo,
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Este gráfico muestra el comportamiento diario del retorno del activo,
                 permitiendo identificar:</p>
 
-                <ul>
-                    <li>Frecuencia e intensidad de pérdidas y ganancias.</li>
-                    <li>Presencia de volatilidad asimétrica (más caídas que subidas).</li>
-                    <li>Episodios de estrés específicos para el activo.</li>
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Frecuencia e intensidad de pérdidas y ganancias.</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Presencia de volatilidad asimétrica (más caídas que subidas).</li>
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Episodios de estrés específicos para el activo.</li>
                 </ul>
 
-                <p>Resulta útil para evaluar el riesgo individual antes de integrarlo
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Resulta útil para evaluar el riesgo individual antes de integrarlo
                 dentro de un portafolio diversificado.</p>
             </div>
             """, unsafe_allow_html=True)
@@ -1108,35 +1108,35 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             st.markdown("""
             <div class="info-card">
-                <p><strong>Interpretación analítica de la frontera eficiente:</strong></p>
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;"><strong style="color: #1E88E5 !important; font-weight: 600 !important;">Interpretación analítica de la frontera eficiente:</strong></p>
 
-                <p>La frontera eficiente representa el conjunto de portafolios
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">La frontera eficiente representa el conjunto de portafolios
                 óptimos que maximizan el retorno esperado para cada nivel
                 de riesgo asumido, de acuerdo con la teoría media–varianza
                 de Markowitz.</p>
 
-                <ul>
-                    <li>Cada punto de la curva corresponde a una combinación
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Cada punto de la curva corresponde a una combinación
                       distinta de activos que no puede ser mejorada simultáneamente
                       en términos de mayor retorno y menor riesgo.</li>
-                    <li>Los portafolios situados por debajo de la frontera son
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">Los portafolios situados por debajo de la frontera son
                       ineficientes, ya que existe al menos una alternativa
                       con mejor desempeño riesgo–retorno.</li>
                 </ul>
 
-                <p>La ubicación de las estrategias analizadas sobre la frontera
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">La ubicación de las estrategias analizadas sobre la frontera
                 permite identificar su perfil:</p>
-                <ul>
-                    <li>El portafolio de <strong>Sharpe Máximo</strong> se sitúa en una zona de
+                <ul style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-left: 1.5rem !important; list-style-type: disc !important;">
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">El portafolio de <strong style="color: #1E88E5 !important; font-weight: 600 !important;">Sharpe Máximo</strong> se sitúa en una zona de
                       mayor eficiencia, priorizando la rentabilidad ajustada
                       por riesgo.</li>
-                    <li>La estrategia de <strong>Mínima Volatilidad</strong> se posiciona en el
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La estrategia de <strong style="color: #1E88E5 !important; font-weight: 600 !important;">Mínima Volatilidad</strong> se posiciona en el
                       extremo de menor riesgo, sacrificando retorno esperado.</li>
-                    <li>La asignación de <strong>Pesos Iguales</strong> actúa como referencia
+                    <li style="color: #E0E0E0 !important; margin-bottom: 0.5rem !important;">La asignación de <strong style="color: #1E88E5 !important; font-weight: 600 !important;">Pesos Iguales</strong> actúa como referencia
                       neutral, sin optimización explícita.</li>
                 </ul>
 
-                <p>Esta visualización facilita la comprensión del trade-off
+                <p style="color: #E0E0E0 !important; line-height: 1.8 !important; margin-bottom: 1rem !important;">Esta visualización facilita la comprensión del trade-off
                 riesgo–retorno y constituye una herramienta central para
                 la toma de decisiones de inversión.</p>
             </div>
@@ -1493,4 +1493,5 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
