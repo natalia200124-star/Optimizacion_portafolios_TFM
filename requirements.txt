@@ -1,9 +1,11 @@
 streamlit
-yfinance
 pandas
+yfinance
 numpy
 scipy
-matplotlib
+plotly
+requests
+
 
 
 
