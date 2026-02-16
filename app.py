@@ -222,7 +222,35 @@ st.markdown("""
     /* Markdown en info cards */
     .info-card p {
         color: #E0E0E0;
-        line-height: 1.6;
+        line-height: 1.8;
+        margin-bottom: 1rem;
+        font-size: 1rem;
+    }
+    
+    .info-card ul {
+        color: #E0E0E0;
+        line-height: 1.8;
+        margin-left: 1.5rem;
+        margin-bottom: 1rem;
+        list-style-type: disc;
+    }
+    
+    .info-card li {
+        color: #E0E0E0;
+        margin-bottom: 0.5rem;
+        font-size: 1rem;
+    }
+    
+    .info-card strong {
+        color: #1E88E5;
+        font-weight: 600;
+    }
+    
+    .info-card ol {
+        color: #E0E0E0;
+        line-height: 1.8;
+        margin-left: 1.5rem;
+        margin-bottom: 1rem;
     }
     
     /* Animación de carga */
@@ -1456,6 +1484,7 @@ st.markdown("""
     <p style="font-size: 0.9rem;">© 2025 - Análisis financiero avanzado</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
