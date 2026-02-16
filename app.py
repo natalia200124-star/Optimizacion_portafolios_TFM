@@ -16,6 +16,42 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+
+import streamlit.components.v1 as components
+
+# ====================================================================
+# JAVASCRIPT: FORZAR ESTILOS DESPUÉS DE QUE LA PÁGINA CARGUE
+# ====================================================================
+components.html("""
+<script>
+(function() {
+    function applyStyles() {
+        const style = document.createElement('style');
+        style.setAttribute('data-force-styles', 'true');
+        style.innerHTML = `
+            .info-card p { color: #E0E0E0 !important; line-height: 1.8 !important; }
+            .info-card ul { color: #E0E0E0 !important; line-height: 1.8 !important; }
+            .info-card li { color: #E0E0E0 !important; }
+            .info-card strong { color: #1E88E5 !important; font-weight: 600 !important; }
+            .info-card h3 { color: #00ACC1 !important; }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', applyStyles);
+    } else {
+        applyStyles();
+    }
+    
+    // Reaplicar cada segundo por si Streamlit recarga
+    setInterval(applyStyles, 1000);
+})();
+</script>
+""", height=0)
+
+
+
 # CSS PERSONALIZADO PROFESIONAL COMPLETO - CORREGIDO
 st.markdown("""
 <style>
