@@ -223,10 +223,6 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
             # Eliminar filas que sigan incompletas (inicio de la serie)
             data = data.dropna()
 
-            # Normalizar índice eliminando timezone si existe
-            if data.index.tz is not None:
-                data.index = data.index.tz_localize(None)
-
             st.subheader("Precios ajustados depurados (primeras filas)")
             st.dataframe(data.head())
 
@@ -361,7 +357,8 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
             # =====================================================================
             # 7) PRECIOS 2025 Y TENDENCIA
             # =====================================================================
-            precios_2025 = data[data.index.year == 2025].tail(10)
+            idx = data.index.tz_localize(None) if data.index.tz is not None else data.index
+            precios_2025 = data[idx.year == 2025].tail(10)
             if precios_2025.empty:
                 st.info("No hay datos de 2025.")
             else:
@@ -1320,6 +1317,15 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
+
+
+
+
+
+
+
+
 
 
 
