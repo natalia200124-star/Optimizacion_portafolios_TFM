@@ -1091,6 +1091,7 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
                 )
 
             st.session_state.analysis_done = True
+            st.session_state.run_analysis = False
 
             st.success("Análisis del portafolio ejecutado correctamente")
 
@@ -1312,6 +1313,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
