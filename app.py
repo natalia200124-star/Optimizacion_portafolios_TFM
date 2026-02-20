@@ -220,8 +220,23 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
             # Rellenar valores faltantes SOLO hacia adelante
             data = data.ffill()
 
+            # Detectar tickers con datos insuficientes
+            tickers_invalidos = [t for t in tickers if data[t].isnull().mean() > 0.2]
+
+            if tickers_invalidos:
+                st.error(
+                    f"Los siguientes tickers no tienen datos suficientes para el "
+                    f"periodo seleccionado: {', '.join(tickers_invalidos)}. "
+                    f"Elimínalos e intente de nuevo."
+                )
+                st.stop()
+
             # Eliminar filas que sigan incompletas (inicio de la serie)
             data = data.dropna()
+
+            if data.empty:
+                st.error("No hay datos suficientes para el periodo seleccionado.")
+                st.stop()
 
             st.subheader("Precios ajustados depurados (primeras filas)")
             st.dataframe(data.head())
@@ -1318,6 +1333,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
