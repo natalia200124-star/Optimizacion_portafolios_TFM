@@ -1208,6 +1208,8 @@ else:
         st.session_state.chat_messages.append(
             {"role": "user", "content": user_question}
         )
+        with st.chat_message("user"):        # ← LÍNEA NUEVA
+            st.markdown(user_question)       # ← LÍNEA NUEVA
 
         results = st.session_state.analysis_results
 
@@ -1313,6 +1315,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
