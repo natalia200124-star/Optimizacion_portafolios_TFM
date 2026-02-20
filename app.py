@@ -1046,8 +1046,8 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
 
             df_weights = pd.DataFrame({
                 "Ticker": tickers,
-                "Peso": final_weights,
-                "Peso (%)": final_weights * 100
+                "Peso": final_weights.round(2),
+                "Peso (%)": (final_weights * 100).round(2)
             })
 
             st.dataframe(df_weights)
@@ -1315,6 +1315,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
