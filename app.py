@@ -223,6 +223,10 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
             # Eliminar filas que sigan incompletas (inicio de la serie)
             data = data.dropna()
 
+            # Normalizar índice eliminando timezone si existe
+            if data.index.tz is not None:
+                data.index = data.index.tz_localize(None)
+
             st.subheader("Precios ajustados depurados (primeras filas)")
             st.dataframe(data.head())
 
@@ -1317,6 +1321,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
