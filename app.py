@@ -357,12 +357,13 @@ if st.session_state.run_analysis and not st.session_state.analysis_done:
             # =====================================================================
             # 7) PRECIOS 2025 Y TENDENCIA
             # =====================================================================
-            idx = data.index.tz_localize(None) if data.index.tz is not None else data.index
+            idx = data.index.tz_localize(None) if getattr(data.index, "tz", None) else data.index
             precios_2025 = data[idx.year == 2025].tail(10)
+            
             if precios_2025.empty:
-                st.info("No hay datos de 2025.")
+                st.info("No hay datos disponibles para 2025.")
             else:
-                st.dataframe(precios_2025)
+                st.dataframe(precios_2025, use_container_width=True)
             st.subheader(f"Tendencia de precios (últimos {years} años)")
             st.line_chart(data)
 
@@ -1317,6 +1318,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
