@@ -138,9 +138,6 @@ st.markdown("""
 # =========================
 # SESSION STATE - INICIALIZACIÓN
 # =========================
-# CAMBIO 3: se conservan analysis_done y analysis_results igual que el original.
-# Se elimina únicamente el flag "run_analysis" que causaba el ciclo de
-# tres estados y dobles renders. El botón ahora activa el cálculo directamente.
 if "analysis_done" not in st.session_state:
     st.session_state.analysis_done = False
 
@@ -166,14 +163,14 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # 1.5) DESCARGA Y DEPURACIÓN DE DATOS (SIN LOOK-AHEAD BIAS)
     # CAMBIO 2: una sola llamada a yf.download para activos + benchmarks
     # =====================================================================
-    end_date = datetime.today()
+    end_date   = datetime.today()
     start_date = end_date.replace(year=end_date.year - years)
 
     benchmark_tickers = ["SPY", "QQQ", "URTH"]
     all_tickers = tickers + benchmark_tickers
 
     raw_data = yf.download(
-        all_tickers,          # descarga todos de una sola vez
+        all_tickers,
         start=start_date,
         end=end_date,
         auto_adjust=False,
@@ -194,7 +191,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     raw_data = raw_data.ffill()
 
     # Separar activos del portafolio y benchmarks
-    data = raw_data[tickers].copy()
+    data           = raw_data[tickers].copy()
     benchmark_data = raw_data[benchmark_tickers].copy()
 
     # Detectar tickers con datos insuficientes
@@ -207,7 +204,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         )
 
     # Eliminar filas que sigan incompletas (inicio de la serie)
-    data = data.dropna()
+    data           = data.dropna()
     benchmark_data = benchmark_data.ffill().dropna()
 
     if data.empty:
@@ -216,20 +213,20 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # =====================================================================
     # 2) RETORNOS Y MATRICES
     # =====================================================================
-    returns = data.pct_change().dropna()
+    returns            = data.pct_change().dropna()
     mean_returns_daily = returns.mean()
-    cov_daily = returns.cov()
+    cov_daily          = returns.cov()
 
-    trading_days = 252
+    trading_days        = 252
     mean_returns_annual = mean_returns_daily * trading_days
-    cov_annual = cov_daily * trading_days
+    cov_annual          = cov_daily          * trading_days
 
     # =====================================================================
     # 3) FUNCIONES DE OPTIMIZACIÓN
     # =====================================================================
     def performance(weights, mean_ret, cov):
-        ret = np.dot(weights, mean_ret)
-        vol = np.sqrt(weights.T @ cov @ weights)
+        ret    = np.dot(weights, mean_ret)
+        vol    = np.sqrt(weights.T @ cov @ weights)
         sharpe = ret / vol if vol > 0 else 0
         return ret, vol, sharpe
 
@@ -242,26 +239,26 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     def max_drawdown(series):
         cumulative_max = series.cummax()
-        drawdown = (series / cumulative_max) - 1
+        drawdown       = (series / cumulative_max) - 1
         return drawdown.min()
 
-    n = len(tickers)
-    x0 = np.repeat(1 / n, n)
-    bounds = tuple((0, 1) for _ in range(n))
+    n           = len(tickers)
+    x0          = np.repeat(1 / n, n)
+    bounds      = tuple((0, 1) for _ in range(n))
     constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
 
     # =====================================================================
     # 4) OPTIMIZACIONES
     # =====================================================================
-    res_sharpe = minimize(neg_sharpe, x0, method="SLSQP",
-                          bounds=bounds, constraints=constraints)
+    res_sharpe     = minimize(neg_sharpe, x0, method="SLSQP",
+                              bounds=bounds, constraints=constraints)
     weights_sharpe = res_sharpe.x
     ret_sharpe, vol_sharpe, sharpe_sharpe = performance(
         weights_sharpe, mean_returns_annual, cov_annual
     )
 
-    res_minvol = minimize(vol, x0, method="SLSQP",
-                          bounds=bounds, constraints=constraints)
+    res_minvol     = minimize(vol, x0, method="SLSQP",
+                              bounds=bounds, constraints=constraints)
     weights_minvol = res_minvol.x
     ret_minvol, vol_minvol, sharpe_minvol = performance(
         weights_minvol, mean_returns_annual, cov_annual
@@ -279,21 +276,21 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     daily_sharpe = returns.dot(weights_sharpe)
     daily_minvol = returns.dot(weights_minvol)
-    daily_equal = returns.dot(weights_equal)
+    daily_equal  = returns.dot(weights_equal)
 
     cum_sharpe = (1 + daily_sharpe).cumprod()
     cum_minvol = (1 + daily_minvol).cumprod()
-    cum_equal = (1 + daily_equal).cumprod()
+    cum_equal  = (1 + daily_equal).cumprod()
 
     dd_sharpe = max_drawdown(cum_sharpe)
     dd_minvol = max_drawdown(cum_minvol)
-    dd_equal = max_drawdown(cum_equal)
+    dd_equal  = max_drawdown(cum_equal)
 
     # =====================================================================
     # 5.1) BENCHMARKS DE MERCADO (ya descargados arriba — CAMBIO 2)
     # =====================================================================
     benchmark_returns = benchmark_data.pct_change().dropna()
-    benchmark_cum = (1 + benchmark_returns).cumprod()
+    benchmark_cum     = (1 + benchmark_returns).cumprod()
 
     # =====================================================================
     # 6) FRONTERA EFICIENTE
@@ -322,61 +319,61 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # 8) COMPARACIÓN SISTEMÁTICA DE ESTRATEGIAS
     # =====================================================================
     df_compare = pd.DataFrame({
-        "Estrategia": ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
-        "Retorno Anual": [ret_sharpe, ret_minvol, ret_equal],
-        "Volatilidad": [vol_sharpe, vol_minvol, vol_equal],
-        "Sharpe": [sharpe_sharpe, sharpe_minvol, sharpe_equal],
-        "Retorno Acumulado": [
+        "Estrategia":       ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
+        "Retorno Anual":    [ret_sharpe, ret_minvol, ret_equal],
+        "Volatilidad":      [vol_sharpe, vol_minvol, vol_equal],
+        "Sharpe":           [sharpe_sharpe, sharpe_minvol, sharpe_equal],
+        "Retorno Acumulado":[
             cum_sharpe.iloc[-1] - 1,
             cum_minvol.iloc[-1] - 1,
-            cum_equal.iloc[-1] - 1
+            cum_equal.iloc[-1]  - 1
         ],
         "Máx Drawdown": [dd_sharpe, dd_minvol, dd_equal]
     })
 
     # =====================================================================
-    # 8.1) VOLATILIDAD HISTÓRICA ROLLING (RIESGO DINÁMICO)
+    # 8.1) VOLATILIDAD HISTÓRICA ROLLING
     # =====================================================================
     rolling_vol = pd.DataFrame({
-        "Sharpe Máximo": daily_sharpe.rolling(252).std() * np.sqrt(252),
+        "Sharpe Máximo":      daily_sharpe.rolling(252).std() * np.sqrt(252),
         "Mínima Volatilidad": daily_minvol.rolling(252).std() * np.sqrt(252),
-        "Pesos Iguales": daily_equal.rolling(252).std() * np.sqrt(252)
+        "Pesos Iguales":      daily_equal.rolling(252).std()  * np.sqrt(252)
     })
 
     # =====================================================================
     # 8.2) RATIO CALMAR
     # =====================================================================
-    calmar_sharpe = ret_sharpe / abs(dd_sharpe)
-    calmar_minvol = ret_minvol / abs(dd_minvol)
-    calmar_equal = ret_equal / abs(dd_equal)
-
     df_calmar = pd.DataFrame({
         "Estrategia": ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
-        "Calmar": [calmar_sharpe, calmar_minvol, calmar_equal]
+        "Calmar": [
+            ret_sharpe / abs(dd_sharpe),
+            ret_minvol / abs(dd_minvol),
+            ret_equal  / abs(dd_equal)
+        ]
     })
 
     # =====================================================================
     # 8.3) SORTINO RATIO
     # =====================================================================
-    downside = returns.copy()
+    downside     = returns.copy()
     downside[downside > 0] = 0
     downside_std = downside.std() * np.sqrt(252)
 
-    sortino_sharpe = ret_sharpe / downside_std.dot(weights_sharpe)
-    sortino_minvol = ret_minvol / downside_std.dot(weights_minvol)
-    sortino_equal = ret_equal / downside_std.dot(weights_equal)
-
     df_sortino = pd.DataFrame({
         "Estrategia": ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
-        "Sortino": [sortino_sharpe, sortino_minvol, sortino_equal]
+        "Sortino": [
+            ret_sharpe / downside_std.dot(weights_sharpe),
+            ret_minvol / downside_std.dot(weights_minvol),
+            ret_equal  / downside_std.dot(weights_equal)
+        ]
     })
 
     # =====================================================================
     # 8.5) TABLA BENCHMARKS
     # =====================================================================
     benchmarks = {
-        "S&P 500 (SPY)": "SPY",
-        "Nasdaq 100 (QQQ)": "QQQ",
+        "S&P 500 (SPY)":     "SPY",
+        "Nasdaq 100 (QQQ)":  "QQQ",
         "MSCI World (URTH)": "URTH"
     }
 
@@ -389,14 +386,14 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     benchmark_summary = []
     for name, ticker in benchmarks.items():
         ret = annualized_return(benchmark_cum[ticker])
-        v = annualized_vol(benchmark_returns[ticker])
-        dd = max_drawdown(benchmark_cum[ticker])
+        v   = annualized_vol(benchmark_returns[ticker])
+        dd  = max_drawdown(benchmark_cum[ticker])
         benchmark_summary.append({
-            "Benchmark": name,
-            "Retorno Anual": ret,
-            "Volatilidad": v,
+            "Benchmark":         name,
+            "Retorno Anual":     ret,
+            "Volatilidad":       v,
             "Retorno Acumulado": benchmark_cum[ticker].iloc[-1] - 1,
-            "Máx Drawdown": dd
+            "Máx Drawdown":      dd
         })
     df_benchmarks = pd.DataFrame(benchmark_summary)
 
@@ -404,22 +401,22 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # 8.6) RENDIMIENTO ACUMULADO COMPARADO CON BENCHMARKS
     # =====================================================================
     comparison_cum = pd.DataFrame({
-        "Sharpe Máximo": cum_sharpe,
+        "Sharpe Máximo":      cum_sharpe,
         "Mínima Volatilidad": cum_minvol,
-        "Pesos Iguales": cum_equal,
-        "S&P 500 (SPY)": benchmark_cum["SPY"],
-        "Nasdaq 100 (QQQ)": benchmark_cum["QQQ"],
-        "MSCI World (URTH)": benchmark_cum["URTH"]
+        "Pesos Iguales":      cum_equal,
+        "S&P 500 (SPY)":      benchmark_cum["SPY"],
+        "Nasdaq 100 (QQQ)":   benchmark_cum["QQQ"],
+        "MSCI World (URTH)":  benchmark_cum["URTH"]
     })
 
     # =====================================================================
-    # 9) SÍNTESIS ANALÍTICA PARA EL ASISTENTE (PERSISTENTE)
+    # 9) SÍNTESIS ANALÍTICA PARA EL ASISTENTE
     # =====================================================================
     asset_summary = {}
     for ticker in tickers:
         asset_summary[ticker] = {
-            "retorno_anual": mean_returns_annual[ticker],
-            "volatilidad": np.sqrt(cov_annual.loc[ticker, ticker]),
+            "retorno_anual":       mean_returns_annual[ticker],
+            "volatilidad":         np.sqrt(cov_annual.loc[ticker, ticker]),
             "contribucion_riesgo": cov_annual.loc[ticker].dot(weights_sharpe)
         }
 
@@ -440,12 +437,12 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # Ponderación temporal (años recientes pesan más)
     df_strategies = pd.DataFrame({
-        "Sharpe Máximo": daily_sharpe,
+        "Sharpe Máximo":      daily_sharpe,
         "Mínima Volatilidad": daily_minvol,
-        "Pesos Iguales": daily_equal
+        "Pesos Iguales":      daily_equal
     })
 
-    years_index = df_strategies.index.year
+    years_index  = df_strategies.index.year
     unique_years = np.sort(years_index.unique())
     year_weights = {
         year: (i + 1) / len(unique_years)
@@ -464,63 +461,62 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     n_assets = len(tickers)
     if best == "Sharpe Máximo":
         final_weights = weights_sharpe
-        metodo = "Optimización por Ratio de Sharpe"
+        metodo        = "Optimización por Ratio de Sharpe"
     elif best == "Mínima Volatilidad":
         final_weights = weights_minvol
-        metodo = "Optimización por Mínima Volatilidad"
+        metodo        = "Optimización por Mínima Volatilidad"
     else:
         final_weights = np.array([1 / n_assets] * n_assets)
-        metodo = "Asignación Equitativa (Pesos Iguales)"
+        metodo        = "Asignación Equitativa (Pesos Iguales)"
 
     df_weights = pd.DataFrame({
-        "Ticker": tickers,
-        "Peso": final_weights.round(2),
+        "Ticker":   tickers,
+        "Peso":     final_weights.round(2),
         "Peso (%)": (final_weights * 100).round(2)
     })
 
-    # Devolver todo lo necesario para la UI y el chat
     return {
-        "tickers": tickers,
-        "data": data,
-        "returns": returns,
-        "cumulative_assets": cumulative_assets,
-        "daily_sharpe": daily_sharpe,
-        "daily_minvol": daily_minvol,
-        "daily_equal": daily_equal,
-        "cum_sharpe": cum_sharpe,
-        "cum_minvol": cum_minvol,
-        "cum_equal": cum_equal,
-        "df_compare": df_compare,
-        "rolling_vol": rolling_vol,
-        "df_calmar": df_calmar,
-        "df_sortino": df_sortino,
-        "df_benchmarks": df_benchmarks,
-        "comparison_cum": comparison_cum,
+        "tickers":            tickers,
+        "data":               data,
+        "returns":            returns,
+        "cumulative_assets":  cumulative_assets,
+        "daily_sharpe":       daily_sharpe,
+        "daily_minvol":       daily_minvol,
+        "daily_equal":        daily_equal,
+        "cum_sharpe":         cum_sharpe,
+        "cum_minvol":         cum_minvol,
+        "cum_equal":          cum_equal,
+        "df_compare":         df_compare,
+        "rolling_vol":        rolling_vol,
+        "df_calmar":          df_calmar,
+        "df_sortino":         df_sortino,
+        "df_benchmarks":      df_benchmarks,
+        "comparison_cum":     comparison_cum,
         "weighted_performance": weighted_performance,
-        "best": best,
-        "metodo": metodo,
-        "df_weights": df_weights,
-        "efficient_vols": efficient_vols,
-        "efficient_rets": efficient_rets,
+        "best":               best,
+        "metodo":             metodo,
+        "df_weights":         df_weights,
+        "efficient_vols":     efficient_vols,
+        "efficient_rets":     efficient_rets,
         "vol_sharpe": vol_sharpe, "ret_sharpe": ret_sharpe,
         "vol_minvol": vol_minvol, "ret_minvol": ret_minvol,
-        "vol_equal": vol_equal,   "ret_equal": ret_equal,
-        "asset_summary": asset_summary,
+        "vol_equal":  vol_equal,  "ret_equal":  ret_equal,
+        "asset_summary":    asset_summary,
         "strategy_summary": strategy_summary,
         "weights": {
-            "Sharpe Máximo": dict(zip(tickers, weights_sharpe)),
+            "Sharpe Máximo":      dict(zip(tickers, weights_sharpe)),
             "Mínima Volatilidad": dict(zip(tickers, weights_minvol)),
-            "Pesos Iguales": dict(zip(tickers, [1 / len(tickers)] * len(tickers)))
+            "Pesos Iguales":      dict(zip(tickers, [1 / len(tickers)] * len(tickers)))
         },
         "retornos": {
-            "Sharpe Máximo": ret_sharpe,
+            "Sharpe Máximo":      ret_sharpe,
             "Mínima Volatilidad": ret_minvol,
-            "Pesos Iguales": ret_equal
+            "Pesos Iguales":      ret_equal
         },
         "volatilidades": {
-            "Sharpe Máximo": vol_sharpe,
+            "Sharpe Máximo":      vol_sharpe,
             "Mínima Volatilidad": vol_minvol,
-            "Pesos Iguales": vol_equal
+            "Pesos Iguales":      vol_equal
         }
     }
 
@@ -557,9 +553,13 @@ years = st.slider(
     value=6
 )
 
-# CAMBIO 3: el botón llama directamente a cargar_y_optimizar (cacheada)
-# y guarda el resultado en session_state. Se eliminó el flag "run_analysis"
-# que generaba el ciclo de tres estados y dobles renders.
+# =========================
+# BOTÓN — FIX DOBLE RERENDER
+# El botón guarda el resultado en session_state y llama st.rerun()
+# inmediatamente. Esto hace que el siguiente render sea limpio:
+# el botón ya no está presionado, analysis_done=True, y los
+# resultados se renderizan una sola vez desde el bloque único de abajo.
+# =========================
 if st.button("Ejecutar optimización"):
     tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
     if len(tickers) < 2:
@@ -568,29 +568,34 @@ if st.button("Ejecutar optimización"):
         try:
             resultado = cargar_y_optimizar(tuple(tickers), years)
             st.session_state.analysis_results = resultado
-            st.session_state.analysis_done = True
-            st.session_state.chat_messages = []
+            st.session_state.analysis_done    = True
+            st.session_state.chat_messages    = []
+            st.rerun()   # ← FIX: fuerza un rerender limpio y evita el doble ciclo
         except ValueError as e:
             st.error(str(e))
         except Exception as e:
             st.error(f"Error: {e}")
 
+# =========================
+# BLOQUE ÚNICO DE RESULTADOS
+# Se eliminó el segundo bloque "MOSTRAR RESULTADOS" que duplicaba
+# el renderizado. Todos los resultados viven aquí, en un solo lugar.
+# =========================
 if st.session_state.analysis_done:
 
     r = st.session_state.analysis_results
 
-    # Referencias locales (misma nomenclatura que el original)
-    data              = r["data"]
-    returns           = r["returns"]
-    tickers           = r["tickers"]
-    cum_sharpe        = r["cum_sharpe"]
-    cum_minvol        = r["cum_minvol"]
-    cum_equal         = r["cum_equal"]
-    daily_sharpe      = r["daily_sharpe"]
-    daily_minvol      = r["daily_minvol"]
-    daily_equal       = r["daily_equal"]
-    best              = r["best"]
-    metodo            = r["metodo"]
+    data         = r["data"]
+    returns      = r["returns"]
+    tickers      = r["tickers"]
+    cum_sharpe   = r["cum_sharpe"]
+    cum_minvol   = r["cum_minvol"]
+    cum_equal    = r["cum_equal"]
+    daily_sharpe = r["daily_sharpe"]
+    daily_minvol = r["daily_minvol"]
+    daily_equal  = r["daily_equal"]
+    best         = r["best"]
+    metodo       = r["metodo"]
 
     st.subheader("Precios ajustados depurados (primeras filas)")
     st.dataframe(data.head())
@@ -668,7 +673,7 @@ if st.session_state.analysis_done:
         )
 
     # =====================================================================
-    # 8.1) VOLATILIDAD HISTÓRICA ROLLING (RIESGO DINÁMICO)
+    # 8.1) VOLATILIDAD HISTÓRICA ROLLING
     # =====================================================================
     st.subheader("Volatilidad histórica móvil")
     st.line_chart(r["rolling_vol"])
@@ -780,9 +785,9 @@ if st.session_state.analysis_done:
 
     crisis = (cum_sharpe.index.year == 2020)
     st.line_chart(pd.DataFrame({
-        "Sharpe Máximo": cum_sharpe[crisis],
+        "Sharpe Máximo":      cum_sharpe[crisis],
         "Mínima Volatilidad": cum_minvol[crisis],
-        "Pesos Iguales": cum_equal[crisis]
+        "Pesos Iguales":      cum_equal[crisis]
     }))
 
     with st.expander("📖 Interpretación – Comportamiento en crisis (COVID 2020)"):
@@ -894,7 +899,7 @@ if st.session_state.analysis_done:
         """)
 
     # =====================================================================
-    # 9) SÍNTESIS ANALÍTICA — INTERPRETACIÓN FINAL PONDERADA EN EL TIEMPO
+    # 9) SÍNTESIS — INTERPRETACIÓN FINAL PONDERADA EN EL TIEMPO
     # =====================================================================
     st.subheader("Interpretación automática del mejor portafolio")
     st.dataframe(r["weighted_performance"].rename("Desempeño_Ponderado"))
@@ -925,7 +930,7 @@ if st.session_state.analysis_done:
     st.success(f"Portafolio recomendado según comportamiento real ponderado: {best}")
 
     # =====================================================================
-    # 9) PESOS ÓPTIMOS SEGÚN PORTAFOLIO RECOMENDADO
+    # PESOS ÓPTIMOS SEGÚN PORTAFOLIO RECOMENDADO
     # =====================================================================
     st.subheader("Pesos óptimos del portafolio recomendado")
 
@@ -979,9 +984,9 @@ if st.session_state.analysis_done:
 
     st.subheader("Comparación de rendimientos de estrategias")
     st.line_chart(pd.DataFrame({
-        "Sharpe Máximo": cum_sharpe,
+        "Sharpe Máximo":      cum_sharpe,
         "Mínima Volatilidad": cum_minvol,
-        "Pesos Iguales": cum_equal
+        "Pesos Iguales":      cum_equal
     }))
 
     with st.expander("📖 Interpretación – Rendimiento acumulado por acción"):
@@ -1003,7 +1008,7 @@ if st.session_state.analysis_done:
         )
 
     # =====================================================================
-    # GRÁFICO DE RETORNOS DIARIOS ACUMULADOS
+    # RETORNOS DIARIOS
     # =====================================================================
     st.subheader("Retornos diarios de los activos")
     st.line_chart(returns)
@@ -1025,9 +1030,6 @@ if st.session_state.analysis_done:
             """
         )
 
-    # =====================================================================
-    # GRÁFICO DE RETORNOS DIARIOS POR ACTIVO
-    # =====================================================================
     st.subheader("Retornos diarios por activo")
 
     for ticker in returns.columns:
@@ -1052,7 +1054,7 @@ if st.session_state.analysis_done:
         )
 
     # =====================================================================
-    # 11) FRONTERA EFICIENTE (MEJORADA CON ETIQUETAS)
+    # 11) FRONTERA EFICIENTE
     # =====================================================================
     st.subheader("Frontera eficiente (Retorno vs Volatilidad)")
 
@@ -1066,13 +1068,16 @@ if st.session_state.analysis_done:
                     s=90, marker="o", label="Sharpe Máximo")
         ax2.scatter(r["vol_minvol"], r["ret_minvol"],
                     s=90, marker="^", label="Mínima Volatilidad")
-        ax2.scatter(r["vol_equal"], r["ret_equal"],
+        ax2.scatter(r["vol_equal"],  r["ret_equal"],
                     s=90, marker="s", label="Pesos Iguales")
-        ax2.annotate("Sharpe Máximo", (r["vol_sharpe"], r["ret_sharpe"]),
+        ax2.annotate("Sharpe Máximo",
+                     (r["vol_sharpe"], r["ret_sharpe"]),
                      xytext=(8, 8), textcoords="offset points", fontweight="bold")
-        ax2.annotate("Mínima Volatilidad", (r["vol_minvol"], r["ret_minvol"]),
+        ax2.annotate("Mínima Volatilidad",
+                     (r["vol_minvol"], r["ret_minvol"]),
                      xytext=(8, -12), textcoords="offset points", fontweight="bold")
-        ax2.annotate("Pesos Iguales", (r["vol_equal"], r["ret_equal"]),
+        ax2.annotate("Pesos Iguales",
+                     (r["vol_equal"], r["ret_equal"]),
                      xytext=(8, 8), textcoords="offset points", fontweight="bold")
         ax2.set_xlabel("Volatilidad anual (riesgo)")
         ax2.set_ylabel("Retorno anual esperado")
@@ -1115,24 +1120,21 @@ if st.session_state.analysis_done:
             """
         )
 
-# ======================================================
-# MOSTRAR RESULTADOS (FUERA DEL BOTÓN)
-# ======================================================
-if st.session_state.analysis_done:
-    results = st.session_state.analysis_results
-
+    # =====================================================================
+    # RESUMEN FINAL DE TABLAS
+    # =====================================================================
     st.subheader("Comparación de estrategias")
-    st.dataframe(results["df_compare"])
+    st.dataframe(r["df_compare"])
 
     st.subheader("Pesos del portafolio recomendado")
-    st.dataframe(results["df_weights"])
+    st.dataframe(r["df_weights"])
 
     df_retornos = pd.DataFrame(
         {
             "Retorno anual esperado": [
-                results["retornos"]["Sharpe Máximo"],
-                results["retornos"]["Mínima Volatilidad"],
-                results["retornos"]["Pesos Iguales"]
+                r["retornos"]["Sharpe Máximo"],
+                r["retornos"]["Mínima Volatilidad"],
+                r["retornos"]["Pesos Iguales"]
             ]
         },
         index=["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"]
@@ -1180,7 +1182,7 @@ else:
         results = st.session_state.analysis_results
 
         best_strategy = results["best"]
-        weights_dict = results["weights"][best_strategy]
+        weights_dict  = results["weights"][best_strategy]
 
         weights_text = "\n".join(
             f"- {k}: {v:.2%}" for k, v in weights_dict.items()
@@ -1267,6 +1269,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
