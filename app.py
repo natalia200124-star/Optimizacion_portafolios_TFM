@@ -146,15 +146,20 @@ if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []
 
 # =========================
-# FIX 1 + FIX 2: FUNCIONES CACHEADAS
-# Una sola descarga (activos + benchmarks juntos) y resultado de optimización cacheado.
-# Streamlit re-ejecuta el script completo en cada interacción del usuario;
-# con @st.cache_data esto solo corre cuando cambian tickers o years.
+# FUNCIÓN CACHEADA — solo descarga los datos crudos de yfinance.
+# La depuración, validación y procesamiento se hacen en el flujo principal
+# para conservar visibilidad y control explícito sobre cada paso (sección 1.5).
+# Combinar activos + benchmarks en UNA sola llamada evita la segunda descarga
+# innecesaria del código original.
 # =========================
 
 @st.cache_data(show_spinner="Descargando datos históricos...")
-def descargar_datos(tickers: tuple, years: int):
-    """Descarga activos + benchmarks en UNA sola llamada a yfinance."""
+def descargar_raw(tickers: tuple, years: int):
+    """
+    Descarga activos + benchmarks en UNA sola llamada a yfinance (cacheada).
+    Devuelve el DataFrame crudo sin procesar para que la sección 1.5
+    del flujo principal aplique la depuración de forma explícita.
+    """
     benchmarks_list = ["SPY", "QQQ", "URTH"]
     todos = list(tickers) + benchmarks_list
 
@@ -169,16 +174,7 @@ def descargar_datos(tickers: tuple, years: int):
         progress=False
     )
 
-    adj = raw_data["Adj Close"]
-    if isinstance(adj.columns, pd.MultiIndex):
-        adj = adj.droplevel(0, axis=1)
-
-    adj = adj.sort_index().ffill()
-
-    data           = adj[list(tickers)].copy()
-    benchmark_data = adj[benchmarks_list].copy()
-
-    return data, benchmark_data, start_date, end_date
+    return raw_data, start_date, end_date
 
 
 st.title("Optimización de Portafolios – Modelo de Markowitz")
@@ -222,12 +218,37 @@ if st.button("Ejecutar optimización"):
         st.stop()
 
     try:
-        # Descarga cacheada (FIX 1 + FIX 2)
-        data, benchmark_data, start_date, end_date = descargar_datos(tuple(tickers), years)
+        # =====================================================================
+        # 1.5) DESCARGA Y DEPURACIÓN DE DATOS (SIN LOOK-AHEAD BIAS)
+        # La descarga usa @st.cache_data (una sola llamada para activos +
+        # benchmarks juntos). El procesamiento y validación se hacen aquí
+        # de forma explícita para mantener visibilidad y control completo.
+        # =====================================================================
+        raw_data, start_date, end_date = descargar_raw(tuple(tickers), years)
 
-        # =====================================================================
-        # DEPURACIÓN DE DATOS (SIN LOOK-AHEAD BIAS)
-        # =====================================================================
+        # Usar precios ajustados (corrige splits y dividendos)
+        data = raw_data["Adj Close"]
+
+        # En caso de MultiIndex
+        if isinstance(data.columns, pd.MultiIndex):
+            data = data.droplevel(0, axis=1)
+
+        # Separar activos de benchmarks
+        benchmarks = {
+            "S&P 500 (SPY)":    "SPY",
+            "Nasdaq 100 (QQQ)": "QQQ",
+            "MSCI World (URTH)":"URTH"
+        }
+        benchmark_data = data[list(benchmarks.values())].copy()
+        data = data[tickers].copy()
+
+        # Ordenar por fecha (seguridad)
+        data = data.sort_index()
+
+        # Rellenar valores faltantes SOLO hacia adelante
+        data = data.ffill()
+
+        # Detectar tickers con datos insuficientes
         tickers_invalidos = [t for t in tickers if data[t].isnull().mean() > 0.2]
 
         if tickers_invalidos:
@@ -238,6 +259,7 @@ if st.button("Ejecutar optimización"):
             )
             st.stop()
 
+        # Eliminar filas que sigan incompletas (inicio de la serie)
         data = data.dropna()
 
         if data.empty:
@@ -324,14 +346,8 @@ if st.button("Ejecutar optimización"):
         dd_equal  = max_drawdown(cum_equal)
 
         # =====================================================================
-        # 5.1) BENCHMARKS (ya descargados con FIX 1, sin segunda llamada a yfinance)
+        # 5.1) BENCHMARKS (ya descargados en sección 1.5, sin segunda llamada a yfinance)
         # =====================================================================
-        benchmarks = {
-            "S&P 500 (SPY)":    "SPY",
-            "Nasdaq 100 (QQQ)": "QQQ",
-            "MSCI World (URTH)":"URTH"
-        }
-
         benchmark_data    = benchmark_data.ffill().dropna()
         benchmark_returns = benchmark_data.pct_change().dropna()
         benchmark_cum     = (1 + benchmark_returns).cumprod()
@@ -1225,6 +1241,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
