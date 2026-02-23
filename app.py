@@ -224,15 +224,23 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # =====================================================================
     # 3) FUNCIONES DE OPTIMIZACIÓN
     # =====================================================================
+
+    # Tasa libre de riesgo anualizada (proxy: T-Bill 3 meses ~4.5%)
+    # Se usa en Sharpe para no sobreestimar el ratio con rf=0
+    RISK_FREE_RATE = 0.045
+
     def performance(weights, mean_ret, cov):
         ret    = np.dot(weights, mean_ret)
         vol    = np.sqrt(weights.T @ cov @ weights)
-        sharpe = ret / vol if vol > 0 else 0
+        # FIX: Sharpe correcto resta la tasa libre de riesgo
+        sharpe = (ret - RISK_FREE_RATE) / vol if vol > 0 else 0
         return ret, vol, sharpe
 
     def neg_sharpe(weights):
-        r, v, _ = performance(weights, mean_returns_annual, cov_annual)
-        return -(r / v) if v > 0 else 1e6
+        # FIX: usa el Sharpe de performance() que ya incluye rf,
+        # en vez de recalcular r/v ignorando la tasa libre de riesgo
+        _, _, sharpe = performance(weights, mean_returns_annual, cov_annual)
+        return -sharpe if sharpe != 0 else 1e6
 
     def vol(weights):
         return np.sqrt(weights.T @ cov_annual @ weights)
@@ -353,23 +361,34 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     })
 
     # =====================================================================
-    # 8.3) SORTINO RATIO
+    # 8.3) SORTINO RATIO — cálculo correcto sobre retornos del portafolio
+    # FIX: la desviación bajista debe calcularse sobre los retornos diarios
+    # del portafolio completo (daily_sharpe, etc.), NO como suma ponderada
+    # de desviaciones bajistas individuales. El método anterior ignoraba
+    # las correlaciones entre activos en días malos.
     # =====================================================================
-    downside     = returns.copy()
-    downside[downside > 0] = 0
-    downside_std = downside.std() * np.sqrt(252)
+    def sortino_ratio(ret_anual, daily_portfolio_returns):
+        downside     = daily_portfolio_returns.copy()
+        downside[downside > 0] = 0
+        downside_dev = downside.std() * np.sqrt(252)
+        # También se resta rf, igual que en Sharpe
+        return (ret_anual - RISK_FREE_RATE) / downside_dev if downside_dev > 0 else np.nan
 
     df_sortino = pd.DataFrame({
         "Estrategia": ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
         "Sortino": [
-            ret_sharpe / downside_std.dot(weights_sharpe),
-            ret_minvol / downside_std.dot(weights_minvol),
-            ret_equal  / downside_std.dot(weights_equal)
+            sortino_ratio(ret_sharpe, daily_sharpe),
+            sortino_ratio(ret_minvol, daily_minvol),
+            sortino_ratio(ret_equal,  daily_equal)
         ]
     })
 
     # =====================================================================
     # 8.5) TABLA BENCHMARKS
+    # FIX: annualized_return ahora usa media aritmética * 252, igual que
+    # ret_sharpe / ret_minvol / ret_equal, para que la tabla de comparación
+    # no mezcle metodologías (antes usaba CAGR geométrico para benchmarks
+    # y aritmético para estrategias, creando diferencias artificiales).
     # =====================================================================
     benchmarks = {
         "S&P 500 (SPY)":     "SPY",
@@ -377,15 +396,16 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "MSCI World (URTH)": "URTH"
     }
 
-    def annualized_return(series):
-        return (series.iloc[-1]) ** (252 / len(series)) - 1
+    def annualized_return(daily_returns_series):
+        # Consistente con mean_returns_annual = mean_returns_daily * 252
+        return daily_returns_series.mean() * 252
 
     def annualized_vol(series):
         return series.std() * np.sqrt(252)
 
     benchmark_summary = []
     for name, ticker in benchmarks.items():
-        ret = annualized_return(benchmark_cum[ticker])
+        ret = annualized_return(benchmark_returns[ticker])   # retornos diarios
         v   = annualized_vol(benchmark_returns[ticker])
         dd  = max_drawdown(benchmark_cum[ticker])
         benchmark_summary.append({
@@ -1269,6 +1289,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
