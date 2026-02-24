@@ -160,8 +160,10 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     tickers = list(tickers_tuple)
 
     # Parámetros de las mejoras
-    LAMBDA_REG    = 0.01   # MEJORA 2: fuerza de regularización L2
-    N_SIMULATIONS = 5000   # MEJORA 3: trayectorias Monte Carlo
+    LAMBDA_REG    = 0.01    # MEJORA 2: fuerza de regularización L2
+    N_SIMULATIONS = 15000   # MEJORA 6: 15,000 trayectorias para reducir ruido estadístico
+    N_BOOTSTRAP   = 15000   # MEJORA 5: muestras Bootstrap histórico
+    MAX_WEIGHT    = 0.5     # MEJORA 8: límite máximo por activo (evita concentraciones irreales)
 
     # =====================================================================
     # 1.5) DESCARGA Y DEPURACIÓN DE DATOS (SIN LOOK-AHEAD BIAS)
@@ -206,10 +208,9 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         raise ValueError("No hay datos suficientes para el periodo seleccionado.")
 
     # =====================================================================
-    # 2) RETORNOS Y MATRICES
-    # MEJORA 4: retornos logarítmicos — mejor fundamento matemático.
-    # Son aditivos en el tiempo y simétricos, lo que mejora la estimación
-    # estadística de medias y covarianzas.
+    # 2) RETORNOS LOGARÍTMICOS Y MATRICES
+    # MEJORA 4: retornos logarítmicos — aditivos en el tiempo, simétricos.
+    # La acumulación correcta es np.exp(cumsum()), NO (1+r).cumprod().
     # =====================================================================
     returns            = np.log(data / data.shift(1)).dropna()
     mean_returns_daily = returns.mean()
@@ -217,9 +218,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     trading_days        = 252
     mean_returns_annual = mean_returns_daily * trading_days
 
-    # MEJORA 1: Ledoit-Wolf Shrinkage
-    # Reduce el ruido en la matriz de covarianza acercándola a una estimación
-    # más estable. El 80% de la inestabilidad de Markowitz viene de aquí.
+    # MEJORA 1: Ledoit-Wolf Shrinkage (MANTENER — pilar de estabilidad)
     lw = LedoitWolf()
     lw.fit(returns)
     cov_daily  = pd.DataFrame(
@@ -238,14 +237,16 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         sharpe = (ret - RISK_FREE_RATE) / vol if vol > 0 else 0
         return ret, vol, sharpe
 
+    # CORRECCIÓN 1: neg_sharpe con regularización L2 — simétrico con MinVol
+    # Antes la penalización L2 solo se aplicaba en volatilidad, lo que
+    # generaba una asimetría matemática entre las dos optimizaciones.
     def neg_sharpe(weights):
-        _, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
-        return -sharpe if vol_val > 0 else 1e6
+        ret_val, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
+        penalty = LAMBDA_REG * np.sum(weights ** 2)
+        return -(sharpe - penalty) if vol_val > 0 else 1e6
 
-    # MEJORA 2: Regularización L2 en la función de volatilidad.
-    # Penaliza pesos muy concentrados (ej. 90% en un solo activo),
-    # produciendo portafolios más diversificados y estables fuera de muestra.
-    def vol(weights):
+    # MEJORA 2: Regularización L2 en volatilidad
+    def vol_obj(weights):
         variance = weights.T @ cov_annual @ weights
         penalty  = LAMBDA_REG * np.sum(weights ** 2)
         return np.sqrt(variance) + penalty
@@ -255,9 +256,11 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         drawdown       = (series / cumulative_max) - 1
         return drawdown.min()
 
-    n           = len(tickers)
-    x0          = np.repeat(1 / n, n)
-    bounds      = tuple((0, 1) for _ in range(n))
+    n      = len(tickers)
+    x0     = np.repeat(1 / n, n)
+
+    # MEJORA 8: límite máximo por activo = 50% — evita concentraciones irreales
+    bounds      = tuple((0, MAX_WEIGHT) for _ in range(n))
     constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
 
     # =====================================================================
@@ -270,7 +273,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         weights_sharpe, mean_returns_annual, cov_annual
     )
 
-    res_minvol     = minimize(vol, x0, method="SLSQP",
+    res_minvol     = minimize(vol_obj, x0, method="SLSQP",
                               bounds=bounds, constraints=constraints)
     weights_minvol = res_minvol.x
     ret_minvol, vol_minvol, sharpe_minvol = performance(
@@ -284,7 +287,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 5) RENDIMIENTOS ACUMULADOS
-    # Con retornos logarítmicos: exp(cumsum) equivale al producto de (1+r)
+    # CORRECCIÓN 2: Con log returns, acumulación = np.exp(cumsum())
     # =====================================================================
     cumulative_assets = np.exp(returns.cumsum())
 
@@ -324,12 +327,12 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
             {"type": "eq",
              "fun": lambda w, targ=targ: np.dot(w, mean_returns_annual) - targ}
         )
-        res = minimize(vol, x0, method="SLSQP",
+        res = minimize(vol_obj, x0, method="SLSQP",
                        bounds=bounds, constraints=cons)
         if res.success:
-            r, v, _ = performance(res.x, mean_returns_annual, cov_annual)
-            efficient_rets.append(r)
-            efficient_vols.append(v)
+            r_val, v_val, _ = performance(res.x, mean_returns_annual, cov_annual)
+            efficient_rets.append(r_val)
+            efficient_vols.append(v_val)
 
     # =====================================================================
     # 8) COMPARACIÓN SISTEMÁTICA DE ESTRATEGIAS
@@ -386,10 +389,10 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     })
 
     # =====================================================================
-    # 8.3.5) SIMULACIÓN MONTE CARLO — MEJORA 3
-    # Simula 5,000 escenarios de retorno anual usando la distribución
-    # normal multivariada estimada con los parámetros del portafolio.
-    # Calcula VaR y CVaR al 95% de confianza para cada estrategia.
+    # 8.3.5a) SIMULACIÓN MONTE CARLO MULTIVARIADA — MEJORA 3 + 6
+    # MEJORA 4 confirmada: simulación multivariada correcta con
+    # np.random.multivariate_normal — NO activos por separado.
+    # 15,000 trayectorias para reducir ruido estadístico (MEJORA 6).
     # =====================================================================
     np.random.seed(42)
     sim_assets = np.random.multivariate_normal(
@@ -420,6 +423,37 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     })
 
     # =====================================================================
+    # 8.3.5b) BOOTSTRAP HISTÓRICO — MEJORA 5
+    # Remuestreo con reemplazo de retornos reales diarios.
+    # No asume distribución normal: captura asimetría y colas pesadas.
+    # Complementa Monte Carlo para mayor credibilidad técnica.
+    # =====================================================================
+    np.random.seed(42)
+    returns_array = returns.values  # shape: (T, n_assets)
+
+    # Remuestrear filas (días) con reemplazo
+    boot_indices = np.random.randint(0, len(returns_array), size=(N_BOOTSTRAP, trading_days))
+    boot_samples = returns_array[boot_indices]  # shape: (N_BOOTSTRAP, 252, n_assets)
+
+    # Retorno anual de cada trayectoria = suma de log returns diarios del año
+    boot_annual = boot_samples.sum(axis=1)  # shape: (N_BOOTSTRAP, n_assets)
+
+    boot_sharpe = boot_annual @ weights_sharpe
+    boot_minvol = boot_annual @ weights_minvol
+    boot_equal  = boot_annual @ weights_equal
+
+    var_bs, cvar_bs, prob_bs = var_cvar(boot_sharpe)
+    var_bm, cvar_bm, prob_bm = var_cvar(boot_minvol)
+    var_be, cvar_be, prob_be = var_cvar(boot_equal)
+
+    df_bootstrap_stats = pd.DataFrame({
+        "Estrategia":    ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
+        "VaR 95% (Boot)":  [var_bs, var_bm, var_be],
+        "CVaR 95% (Boot)": [cvar_bs, cvar_bm, cvar_be],
+        "Prob. Pérdida (Boot)": [prob_bs, prob_bm, prob_be]
+    })
+
+    # =====================================================================
     # 8.5) TABLA BENCHMARKS
     # =====================================================================
     benchmarks = {
@@ -431,20 +465,20 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     def annualized_return(daily_returns_series):
         return daily_returns_series.mean() * 252
 
-    def annualized_vol(series):
+    def annualized_vol_bm(series):
         return series.std() * np.sqrt(252)
 
     benchmark_summary = []
     for name, ticker in benchmarks.items():
-        ret = annualized_return(benchmark_log_returns[ticker])
-        v   = annualized_vol(benchmark_log_returns[ticker])
-        dd  = max_drawdown(benchmark_cum[ticker])
+        ret_bm = annualized_return(benchmark_log_returns[ticker])
+        v_bm   = annualized_vol_bm(benchmark_log_returns[ticker])
+        dd_bm  = max_drawdown(benchmark_cum[ticker])
         benchmark_summary.append({
             "Benchmark":         name,
-            "Retorno Anual":     ret,
-            "Volatilidad":       v,
+            "Retorno Anual":     ret_bm,
+            "Volatilidad":       v_bm,
             "Retorno Acumulado": benchmark_cum[ticker].iloc[-1] - 1,
-            "Máx Drawdown":      dd
+            "Máx Drawdown":      dd_bm
         })
     df_benchmarks = pd.DataFrame(benchmark_summary)
 
@@ -459,6 +493,42 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "Nasdaq 100 (QQQ)":   benchmark_cum["QQQ"],
         "MSCI World (URTH)":  benchmark_cum["URTH"]
     })
+
+    # =====================================================================
+    # 9) MEJORA 9: ANÁLISIS DE ROBUSTEZ TEMPORAL
+    # Optimización en sub-periodos (3, 5 y N años completos).
+    # Muestra cuánto cambian los pesos — señal de estabilidad del modelo.
+    # =====================================================================
+    robustez_rows = []
+    periodos_disponibles = []
+    for p_years in [3, 5, years]:
+        p_start = end_date.replace(year=end_date.year - p_years)
+        if p_start >= data.index[0].to_pydatetime().replace(tzinfo=None):
+            p_ret = returns[returns.index >= pd.Timestamp(p_start)]
+            if len(p_ret) < 60:
+                continue
+            p_mean = p_ret.mean() * trading_days
+            lw_p   = LedoitWolf()
+            lw_p.fit(p_ret)
+            p_cov  = pd.DataFrame(lw_p.covariance_, index=p_ret.columns, columns=p_ret.columns) * trading_days
+
+            def neg_sharpe_p(w):
+                r_p = np.dot(w, p_mean)
+                v_p = np.sqrt(w.T @ p_cov.values @ w)
+                sh  = (r_p - RISK_FREE_RATE) / v_p if v_p > 0 else 0
+                pen = LAMBDA_REG * np.sum(w ** 2)
+                return -(sh - pen)
+
+            res_p = minimize(neg_sharpe_p, x0, method="SLSQP",
+                             bounds=bounds, constraints=constraints)
+            if res_p.success:
+                row = {"Periodo": f"{p_years} años"}
+                for t, w in zip(tickers, res_p.x):
+                    row[t] = round(w, 4)
+                robustez_rows.append(row)
+                periodos_disponibles.append(p_years)
+
+    df_robustez = pd.DataFrame(robustez_rows) if robustez_rows else pd.DataFrame()
 
     # =====================================================================
     # 9) SÍNTESIS ANALÍTICA PARA EL ASISTENTE
@@ -501,7 +571,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     weights_series = years_index.map(year_weights)
 
     weighted_performance = (
-        (1 + df_strategies).cumprod()
+        np.exp(df_strategies.cumsum())
         .mul(weights_series, axis=0)
         .iloc[-1]
     )
@@ -540,10 +610,17 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "df_calmar":          df_calmar,
         "df_sortino":         df_sortino,
         "df_mc_stats":        df_mc_stats,
+        "df_bootstrap_stats": df_bootstrap_stats,
+        "df_robustez":        df_robustez,
         "mc_simulations": {
             "Sharpe Máximo":      sim_sharpe,
             "Mínima Volatilidad": sim_minvol,
             "Pesos Iguales":      sim_equal
+        },
+        "bootstrap_simulations": {
+            "Sharpe Máximo":      boot_sharpe,
+            "Mínima Volatilidad": boot_minvol,
+            "Pesos Iguales":      boot_equal
         },
         "df_benchmarks":      df_benchmarks,
         "comparison_cum":     comparison_cum,
@@ -822,9 +899,9 @@ if st.session_state.analysis_done:
         )
 
     # =====================================================================
-    # 8.3.5) SIMULACIÓN MONTE CARLO
+    # 8.3.5a) SIMULACIÓN MONTE CARLO
     # =====================================================================
-    st.subheader("Simulación Monte Carlo – Análisis de riesgo forward-looking")
+    st.subheader("Simulación Monte Carlo – Análisis de riesgo forward-looking (15,000 escenarios)")
     st.dataframe(r["df_mc_stats"])
 
     _mc1, _mc2, _mc3 = st.columns([0.3, 2.5, 0.3])
@@ -836,7 +913,7 @@ if st.session_state.analysis_done:
         ax_mc.axvline(0, color="white", linestyle="--", linewidth=1.2, alpha=0.7)
         ax_mc.set_xlabel("Retorno anual simulado")
         ax_mc.set_ylabel("Frecuencia")
-        ax_mc.set_title("Distribución de retornos anuales – Monte Carlo (5,000 simulaciones)")
+        ax_mc.set_title("Distribución de retornos anuales – Monte Carlo (15,000 simulaciones)")
         ax_mc.legend()
         ax_mc.grid(True, alpha=0.2)
         st.pyplot(fig_mc)
@@ -847,9 +924,11 @@ if st.session_state.analysis_done:
         """
         **Interpretación analítica de la Simulación Monte Carlo:**
 
-        La simulación genera 5.000 escenarios posibles de retorno anual para cada estrategia
-        utilizando la media y la matriz de covarianza estimadas. Esto permite evaluar el
-        comportamiento del portafolio bajo incertidumbre futura, no solo con datos históricos.
+        La simulación genera 15,000 escenarios posibles de retorno anual para cada estrategia
+        utilizando la media y la matriz de covarianza multivariada estimada con Ledoit-Wolf.
+        Esto permite evaluar el comportamiento del portafolio bajo incertidumbre futura,
+        no solo con datos históricos. El mayor número de simulaciones (15,000 vs. 5,000)
+        reduce el ruido estadístico y produce estimaciones de riesgo más estables.
 
         **¿Cómo interpretar las distribuciones?**
 
@@ -876,6 +955,59 @@ if st.session_state.analysis_done:
         - Si se prioriza estabilidad y control de pérdidas extremas → **Mínima Volatilidad**.
 
         La decisión óptima surge del equilibrio entre retorno esperado y tolerancia al riesgo extremo.
+        """
+        )
+
+    # =====================================================================
+    # 8.3.5b) BOOTSTRAP HISTÓRICO
+    # =====================================================================
+    st.subheader("Bootstrap Histórico – Análisis de riesgo sin supuesto de normalidad (15,000 muestras)")
+    st.dataframe(r["df_bootstrap_stats"])
+
+    _bs1, _bs2, _bs3 = st.columns([0.3, 2.5, 0.3])
+    with _bs2:
+        fig_bs, ax_bs = plt.subplots(figsize=(8, 4))
+        colors = ["#00d9ff", "#66ff99", "#ff9966"]
+        for (name, sims), color in zip(r["bootstrap_simulations"].items(), colors):
+            ax_bs.hist(sims, bins=80, alpha=0.55, label=name, color=color)
+        ax_bs.axvline(0, color="white", linestyle="--", linewidth=1.2, alpha=0.7)
+        ax_bs.set_xlabel("Retorno anual simulado (Bootstrap)")
+        ax_bs.set_ylabel("Frecuencia")
+        ax_bs.set_title("Distribución de retornos – Bootstrap histórico (15,000 muestras)")
+        ax_bs.legend()
+        ax_bs.grid(True, alpha=0.2)
+        st.pyplot(fig_bs)
+        plt.close(fig_bs)
+
+    with st.expander("📖 Interpretación – Bootstrap Histórico"):
+        st.markdown(
+        """
+        **Interpretación analítica del Bootstrap Histórico:**
+
+        A diferencia de la simulación Monte Carlo —que asume que los retornos siguen una
+        distribución normal multivariada—, el Bootstrap histórico **no impone ningún supuesto
+        de distribución**: remuestrea directamente los retornos diarios reales con reemplazo,
+        preservando la asimetría, las colas pesadas y los patrones de correlación observados
+        en los datos históricos.
+
+        **¿Por qué es valioso este enfoque?**
+
+        - Captura eventos extremos reales (crisis, crashes) que la distribución normal subestima.
+        - Es más robusto en mercados con distribuciones no gaussianas (habitual en renta variable).
+        - Complementa Monte Carlo: si ambos métodos coinciden, los resultados son más confiables.
+        - Si difieren significativamente, indica que la distribución de retornos tiene
+          colas pesadas o asimetrías importantes que merecen atención.
+
+        **Métricas clave:**
+        - **VaR 95% (Boot):** pérdida máxima en el 5% de los peores años remuestreados.
+        - **CVaR 95% (Boot):** promedio de pérdidas en esos escenarios extremos históricos.
+        - **Prob. Pérdida (Boot):** fracción de años simulados con retorno negativo.
+
+        **Lectura recomendada:**
+        Compare las cifras del Bootstrap con las de Monte Carlo. Una diferencia pequeña
+        sugiere que la distribución normal es una aproximación razonable. Una diferencia
+        grande indica que los retornos históricos tienen comportamientos extremos que
+        el modelo normal no captura adecuadamente.
         """
         )
 
@@ -1000,6 +1132,38 @@ if st.session_state.analysis_done:
         """)
 
     # =====================================================================
+    # 8.7) ANÁLISIS DE ROBUSTEZ TEMPORAL — MEJORA 9
+    # =====================================================================
+    if not r["df_robustez"].empty:
+        st.subheader("Robustez temporal – Estabilidad de pesos por sub-periodo")
+        st.dataframe(r["df_robustez"])
+
+        with st.expander("📖 Interpretación – Análisis de robustez temporal"):
+            st.markdown("""
+            **Interpretación del análisis de robustez temporal:**
+
+            Esta tabla muestra cómo cambian los pesos óptimos del portafolio de Sharpe Máximo
+            cuando se optimiza sobre diferentes sub-periodos históricos (3, 5 y N años).
+
+            **¿Por qué es importante?**
+
+            - Si los pesos son **similares entre periodos**, el modelo es **estable y robusto**:
+              la señal de optimización es consistente independientemente del horizonte temporal.
+            - Si los pesos **cambian drásticamente**, indica que el modelo es sensible
+              a qué datos se incluyen, lo cual es una limitación importante que el inversor
+              debe considerar.
+
+            **Cómo leer la tabla:**
+            - Cada fila representa una optimización independiente sobre ese sub-periodo.
+            - Columnas son los tickers analizados.
+            - Compare los valores fila a fila: variaciones menores a 10–15 puntos porcentuales
+              sugieren estabilidad razonable; variaciones mayores indican fragilidad del modelo.
+
+            Este análisis es uno de los más valorados en evaluaciones técnicas avanzadas,
+            ya que demuestra si la optimización tiene validez fuera del periodo de entrenamiento.
+            """)
+
+    # =====================================================================
     # 9) SÍNTESIS — INTERPRETACIÓN FINAL PONDERADA EN EL TIEMPO
     # =====================================================================
     st.subheader("Interpretación automática del mejor portafolio")
@@ -1058,6 +1222,8 @@ if st.session_state.analysis_done:
             - La suma total de los pesos es del **100%**.
             - Esta asignación refleja el comportamiento histórico del portafolio
               bajo el criterio seleccionado.
+            - Ningún activo puede superar el **50% del portafolio** (límite técnico
+              para evitar concentraciones excesivas poco realistas).
 
             ### Explicación extendida de los pesos óptimos
 
@@ -1119,7 +1285,7 @@ if st.session_state.analysis_done:
             """
             **Interpretación:**
 
-            Este gráfico muestra los retornos porcentuales diarios de cada activo,
+            Este gráfico muestra los retornos logarítmicos diarios de cada activo,
             evidenciando la volatilidad de corto plazo.
 
             - Picos positivos o negativos representan movimientos abruptos del mercado.
@@ -1370,6 +1536,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
