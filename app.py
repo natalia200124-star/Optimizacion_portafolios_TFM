@@ -844,28 +844,39 @@ if st.session_state.analysis_done:
 
     with st.expander("📖 Interpretación – Simulación Monte Carlo"):
         st.markdown(
-            """
-            **Interpretación analítica de la Simulación Monte Carlo:**
+        """
+        **Interpretación analítica de la Simulación Monte Carlo:**
 
-            Esta simulación genera 5,000 escenarios posibles de retorno anual
-            para cada estrategia, usando la media y la covarianza estimadas
-            de los activos. Permite evaluar el riesgo de forma **prospectiva**,
-            no solo histórica.
+        La simulación genera 5.000 escenarios posibles de retorno anual para cada estrategia
+        utilizando la media y la matriz de covarianza estimadas. Esto permite evaluar el
+        comportamiento del portafolio bajo incertidumbre futura, no solo con datos históricos.
 
-            **Métricas clave:**
-            - **VaR 95% (Value at Risk):** pérdida máxima esperada en el 5%
-              de los peores escenarios. Si el VaR es -15%, significa que en
-              el 5% de los casos se podría perder al menos un 15%.
-            - **CVaR 95% (Expected Shortfall):** promedio de las pérdidas en
-              ese 5% más adverso. Más conservador que el VaR porque refleja
-              la severidad de los escenarios extremos.
-            - **Probabilidad de pérdida:** porcentaje de escenarios donde el
-              portafolio termina en negativo en el año.
+        **¿Cómo interpretar las distribuciones?**
 
-            La línea vertical blanca marca el punto de retorno cero.
-            Las distribuciones más desplazadas hacia la derecha y más estrechas
-            indican estrategias con mejor perfil de riesgo esperado.
-            """
+        - Las curvas más desplazadas hacia la derecha indican mayor retorno esperado.
+        - Las distribuciones más estrechas reflejan menor volatilidad y mayor estabilidad.
+        - Una mayor concentración de valores a la izquierda del cero implica mayor probabilidad de pérdida.
+
+        **Métricas clave de riesgo extremo:**
+        - **VaR 95%:** pérdida máxima esperada en el 5% de los peores escenarios.
+        - **CVaR 95%:** promedio de las pérdidas en esos escenarios extremos.
+        - **Probabilidad de pérdida:** porcentaje de escenarios con retorno anual negativo.
+
+        **Lectura estratégica:**
+
+        - El portafolio de **Sharpe Máximo** tiende a mostrar mayor retorno esperado,
+          aunque con mayor dispersión y exposición a escenarios adversos.
+        - El portafolio de **Mínima Volatilidad** presenta una distribución más compacta,
+          reduciendo la severidad de pérdidas extremas, pero con menor potencial de crecimiento.
+        - La estrategia de **Pesos Iguales** actúa como referencia neutral sin optimización específica.
+
+        En términos prácticos, la mejor estrategia dependerá del perfil del inversor:
+
+        - Si se prioriza maximizar retorno ajustado por riesgo → **Sharpe Máximo**.
+        - Si se prioriza estabilidad y control de pérdidas extremas → **Mínima Volatilidad**.
+
+        La decisión óptima surge del equilibrio entre retorno esperado y tolerancia al riesgo extremo.
+        """
         )
 
     # =====================================================================
@@ -1359,6 +1370,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
