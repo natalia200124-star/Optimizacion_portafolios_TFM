@@ -8,6 +8,32 @@ from datetime import datetime
 import requests
 import os
 from sklearn.covariance import LedoitWolf  # MEJORA 1: covarianza robusta
+from scipy.stats import gaussian_kde
+from matplotlib.ticker import FuncFormatter
+
+# ── Paleta de diseño oscuro (coherente con el tema de la app) ──────────────
+_BG_DARK  = "#0f1419"
+_BG_PANEL = "#1a1f2e"
+_BG_CARD  = "#1e2433"
+_CYAN     = "#00d9ff"
+_GREEN    = "#66ff99"
+_PURPLE   = "#b388ff"
+_ORANGE   = "#ff9966"
+_GRID     = "#2a3347"
+_TEXT     = "#e1e7ed"
+_DIM      = "#7a8499"
+_PCT      = FuncFormatter(lambda x, _: f"{x:.0%}")
+
+def _dark_ax(ax):
+    """Aplica el tema oscuro de la app a un eje de matplotlib."""
+    ax.set_facecolor(_BG_PANEL)
+    for sp in ax.spines.values():
+        sp.set_edgecolor(_GRID)
+    ax.tick_params(colors=_DIM, labelsize=9)
+    ax.xaxis.label.set_color(_TEXT)
+    ax.yaxis.label.set_color(_TEXT)
+    ax.grid(True, color=_GRID, linewidth=0.6, alpha=0.7)
+    return ax
 
 # =========================
 # RISK_FREE_RATE fuera de la función cacheada
@@ -899,115 +925,105 @@ if st.session_state.analysis_done:
         )
 
     # =====================================================================
-    # 8.3.5a) SIMULACIÓN MONTE CARLO
+    # 8.3.5) MONTE CARLO + BOOTSTRAP — panel lado a lado
     # =====================================================================
-    st.subheader("Simulación Monte Carlo – Análisis de riesgo forward-looking (15,000 escenarios)")
-    st.dataframe(r["df_mc_stats"])
+    st.subheader("Análisis de Riesgo Forward-Looking: Monte Carlo vs Bootstrap Histórico")
 
-    _mc1, _mc2, _mc3 = st.columns([0.3, 2.5, 0.3])
-    with _mc2:
-        fig_mc, ax_mc = plt.subplots(figsize=(8, 4))
-        colors = ["#00d9ff", "#66ff99", "#ff9966"]
-        for (name, sims), color in zip(r["mc_simulations"].items(), colors):
-            ax_mc.hist(sims, bins=80, alpha=0.55, label=name, color=color)
-        ax_mc.axvline(0, color="white", linestyle="--", linewidth=1.2, alpha=0.7)
-        ax_mc.set_xlabel("Retorno anual simulado")
-        ax_mc.set_ylabel("Frecuencia")
-        ax_mc.set_title("Distribución de retornos anuales – Monte Carlo (15,000 simulaciones)")
-        ax_mc.legend()
-        ax_mc.grid(True, alpha=0.2)
-        st.pyplot(fig_mc)
-        plt.close(fig_mc)
+    # Tablas de métricas
+    _t1, _t2 = st.columns(2)
+    with _t1:
+        st.caption("📊 Monte Carlo (distribución normal multivariada)")
+        st.dataframe(r["df_mc_stats"], use_container_width=True)
+    with _t2:
+        st.caption("📊 Bootstrap Histórico (retornos reales sin supuesto de normalidad)")
+        st.dataframe(r["df_bootstrap_stats"], use_container_width=True)
 
-    with st.expander("📖 Interpretación – Simulación Monte Carlo"):
+    # ── Gráfica combinada lado a lado ────────────────────────────────────
+    def _kde_panel(ax, simulations_dict, title, subtitle):
+        palette = [_CYAN, _GREEN, _PURPLE]
+        for (name, sims), col in zip(simulations_dict.items(), palette):
+            kde = gaussian_kde(sims, bw_method=0.18)
+            xs  = np.linspace(
+                min(sims.min(), -0.5),
+                max(sims.max(),  0.7),
+                500
+            )
+            ys = kde(xs)
+            ax.fill_between(xs, ys, alpha=0.18, color=col)
+            ax.plot(xs, ys, color=col, linewidth=2.2, label=name)
+            var95   = np.percentile(sims, 5)
+            xs_tail = xs[xs <= var95]
+            ax.fill_between(xs_tail, kde(xs_tail), alpha=0.50, color=col)
+            ax.axvline(var95, color=col, linewidth=1.0, linestyle=":")
+
+        ax.axvline(0, color="white", linewidth=1.8,
+                   linestyle="--", alpha=0.55, label="Retorno = 0%")
+
+        ylim = ax.get_ylim()
+        ax.text(ax.get_xlim()[0] + 0.02, ylim[1] * 0.88,
+                "◀ Área sombreada\n   = Cola VaR 95%",
+                color=_DIM, fontsize=7.5, style="italic")
+
+        ax.xaxis.set_major_formatter(_PCT)
+        ax.set_xlabel("Retorno anual simulado", fontsize=9)
+        ax.set_ylabel("Densidad de probabilidad", fontsize=9)
+        ax.set_title(title, fontsize=11, fontweight="bold", color=_CYAN, pad=10)
+        ax.text(0.5, 1.01, subtitle, transform=ax.transAxes,
+                ha="center", va="bottom", fontsize=7.5, color=_DIM)
+        ax.legend(facecolor=_BG_CARD, edgecolor=_GRID,
+                  labelcolor=_TEXT, fontsize=8)
+
+    fig_dual, (ax_mc, ax_bt) = plt.subplots(
+        1, 2, figsize=(13, 4.5), facecolor=_BG_DARK
+    )
+    _dark_ax(ax_mc)
+    _dark_ax(ax_bt)
+
+    _kde_panel(ax_mc, r["mc_simulations"],
+               "Monte Carlo",
+               "15,000 simulaciones · Asume distribución normal multivariada")
+    _kde_panel(ax_bt, r["bootstrap_simulations"],
+               "Bootstrap Histórico",
+               "15,000 muestras · Usa retornos reales · Sin supuesto de normalidad")
+
+    fig_dual.suptitle(
+        "Distribución de Retornos Anuales Simulados por Estrategia",
+        fontsize=12, fontweight="bold", color=_TEXT, y=1.02
+    )
+    fig_dual.tight_layout()
+    st.pyplot(fig_dual)
+    plt.close(fig_dual)
+
+    with st.expander("📖 Interpretación – Monte Carlo vs Bootstrap Histórico"):
         st.markdown(
         """
-        **Interpretación analítica de la Simulación Monte Carlo:**
+        **¿Qué muestra esta gráfica?**
 
-        La simulación genera 15,000 escenarios posibles de retorno anual para cada estrategia
-        utilizando la media y la matriz de covarianza multivariada estimada con Ledoit-Wolf.
-        Esto permite evaluar el comportamiento del portafolio bajo incertidumbre futura,
-        no solo con datos históricos. El mayor número de simulaciones (15,000 vs. 5,000)
-        reduce el ruido estadístico y produce estimaciones de riesgo más estables.
+        Cada curva representa la distribución de posibles retornos anuales de una estrategia,
+        estimada con dos métodos distintos que se muestran lado a lado para facilitar la comparación.
 
-        **¿Cómo interpretar las distribuciones?**
+        **Panel izquierdo – Monte Carlo:**
+        Genera 15,000 escenarios asumiendo que los retornos siguen una distribución normal
+        multivariada. Es el método estándar en finanzas cuantitativas.
 
-        - Las curvas más desplazadas hacia la derecha indican mayor retorno esperado.
-        - Las distribuciones más estrechas reflejan menor volatilidad y mayor estabilidad.
-        - Una mayor concentración de valores a la izquierda del cero implica mayor probabilidad de pérdida.
+        **Panel derecho – Bootstrap Histórico:**
+        Remuestrea directamente los retornos diarios reales, sin imponer ningún supuesto
+        de distribución. Captura mejor los eventos extremos (crisis, crashes) y las colas
+        pesadas que la distribución normal subestima.
 
-        **Métricas clave de riesgo extremo:**
-        - **VaR 95%:** pérdida máxima esperada en el 5% de los peores escenarios.
-        - **CVaR 95%:** promedio de las pérdidas en esos escenarios extremos.
-        - **Probabilidad de pérdida:** porcentaje de escenarios con retorno anual negativo.
+        **Cómo leer las curvas:**
+        - Curvas desplazadas a la **derecha** → mayor retorno esperado.
+        - Curvas más **estrechas** → menor volatilidad, resultados más predecibles.
+        - El **área sombreada** en cada curva representa la cola del VaR 95%: los peores escenarios
+          (5% de probabilidad). Cuanto mayor sea esta zona a la izquierda del cero, mayor el riesgo extremo.
+        - La **línea punteada vertical** marca el retorno = 0%. Todo lo que queda a su izquierda
+          representa pérdida para el inversor.
 
-        **Lectura estratégica:**
-
-        - El portafolio de **Sharpe Máximo** tiende a mostrar mayor retorno esperado,
-          aunque con mayor dispersión y exposición a escenarios adversos.
-        - El portafolio de **Mínima Volatilidad** presenta una distribución más compacta,
-          reduciendo la severidad de pérdidas extremas, pero con menor potencial de crecimiento.
-        - La estrategia de **Pesos Iguales** actúa como referencia neutral sin optimización específica.
-
-        En términos prácticos, la mejor estrategia dependerá del perfil del inversor:
-
-        - Si se prioriza maximizar retorno ajustado por riesgo → **Sharpe Máximo**.
-        - Si se prioriza estabilidad y control de pérdidas extremas → **Mínima Volatilidad**.
-
-        La decisión óptima surge del equilibrio entre retorno esperado y tolerancia al riesgo extremo.
-        """
-        )
-
-    # =====================================================================
-    # 8.3.5b) BOOTSTRAP HISTÓRICO
-    # =====================================================================
-    st.subheader("Bootstrap Histórico – Análisis de riesgo sin supuesto de normalidad (15,000 muestras)")
-    st.dataframe(r["df_bootstrap_stats"])
-
-    _bs1, _bs2, _bs3 = st.columns([0.3, 2.5, 0.3])
-    with _bs2:
-        fig_bs, ax_bs = plt.subplots(figsize=(8, 4))
-        colors = ["#00d9ff", "#66ff99", "#ff9966"]
-        for (name, sims), color in zip(r["bootstrap_simulations"].items(), colors):
-            ax_bs.hist(sims, bins=80, alpha=0.55, label=name, color=color)
-        ax_bs.axvline(0, color="white", linestyle="--", linewidth=1.2, alpha=0.7)
-        ax_bs.set_xlabel("Retorno anual simulado (Bootstrap)")
-        ax_bs.set_ylabel("Frecuencia")
-        ax_bs.set_title("Distribución de retornos – Bootstrap histórico (15,000 muestras)")
-        ax_bs.legend()
-        ax_bs.grid(True, alpha=0.2)
-        st.pyplot(fig_bs)
-        plt.close(fig_bs)
-
-    with st.expander("📖 Interpretación – Bootstrap Histórico"):
-        st.markdown(
-        """
-        **Interpretación analítica del Bootstrap Histórico:**
-
-        A diferencia de la simulación Monte Carlo —que asume que los retornos siguen una
-        distribución normal multivariada—, el Bootstrap histórico **no impone ningún supuesto
-        de distribución**: remuestrea directamente los retornos diarios reales con reemplazo,
-        preservando la asimetría, las colas pesadas y los patrones de correlación observados
-        en los datos históricos.
-
-        **¿Por qué es valioso este enfoque?**
-
-        - Captura eventos extremos reales (crisis, crashes) que la distribución normal subestima.
-        - Es más robusto en mercados con distribuciones no gaussianas (habitual en renta variable).
-        - Complementa Monte Carlo: si ambos métodos coinciden, los resultados son más confiables.
-        - Si difieren significativamente, indica que la distribución de retornos tiene
-          colas pesadas o asimetrías importantes que merecen atención.
-
-        **Métricas clave:**
-        - **VaR 95% (Boot):** pérdida máxima en el 5% de los peores años remuestreados.
-        - **CVaR 95% (Boot):** promedio de pérdidas en esos escenarios extremos históricos.
-        - **Prob. Pérdida (Boot):** fracción de años simulados con retorno negativo.
-
-        **Lectura recomendada:**
-        Compare las cifras del Bootstrap con las de Monte Carlo. Una diferencia pequeña
-        sugiere que la distribución normal es una aproximación razonable. Una diferencia
-        grande indica que los retornos históricos tienen comportamientos extremos que
-        el modelo normal no captura adecuadamente.
+        **Lectura comparativa entre paneles:**
+        - Si ambos métodos muestran distribuciones similares → la distribución normal
+          es una buena aproximación para ese portafolio.
+        - Si el Bootstrap muestra colas más pesadas o mayor asimetría → los retornos históricos
+          tienen comportamientos extremos que Monte Carlo no captura bien.
         """
         )
 
@@ -1204,11 +1220,60 @@ if st.session_state.analysis_done:
 
     _cw1, _cw2, _cw3 = st.columns([0.5, 2, 0.5])
     with _cw2:
-        fig, ax = plt.subplots(figsize=(6, 3.5))
-        ax.barh(df_weights["Ticker"], df_weights["Peso"])
-        ax.set_title(f"Composición del portafolio recomendado\n({metodo})")
-        st.pyplot(fig)
-        plt.close(fig)
+        _n = len(df_weights)
+        _bar_colors = [_CYAN, _GREEN, _PURPLE, _ORANGE,
+                       "#ff6b9d", "#ffd166"][:_n]
+        _eq_w = 1 / _n
+
+        fig_w, ax_w = plt.subplots(figsize=(7, max(3, _n * 0.9)),
+                                    facecolor=_BG_DARK)
+        _dark_ax(ax_w)
+
+        bars = ax_w.barh(
+            df_weights["Ticker"], df_weights["Peso"],
+            color=_bar_colors, height=0.55,
+            edgecolor=_BG_DARK, linewidth=0.8
+        )
+
+        # Etiquetas dentro/fuera de barra según ancho
+        for bar, w in zip(bars, df_weights["Peso"]):
+            if w > 0.10:
+                ax_w.text(
+                    bar.get_width() - 0.015,
+                    bar.get_y() + bar.get_height() / 2,
+                    f"{w:.1%}", va="center", ha="right",
+                    color="white", fontsize=11, fontweight="bold"
+                )
+            else:
+                ax_w.text(
+                    bar.get_width() + 0.008,
+                    bar.get_y() + bar.get_height() / 2,
+                    f"{w:.1%}", va="center", ha="left",
+                    color=_TEXT, fontsize=11, fontweight="bold"
+                )
+
+        # Línea de referencia: peso equitativo
+        ax_w.axvline(_eq_w, color=_ORANGE, linewidth=1.4,
+                     linestyle="--", alpha=0.85)
+        ax_w.text(_eq_w + 0.005, _n - 0.65,
+                  f"Peso igual ({_eq_w:.0%})",
+                  color=_ORANGE, fontsize=8)
+
+        ax_w.xaxis.set_major_formatter(_PCT)
+        ax_w.set_xlabel("Proporción del capital asignada", fontsize=10)
+        ax_w.set_title(
+            f"Composición del Portafolio Recomendado",
+            fontsize=11, fontweight="bold", color=_CYAN, pad=10
+        )
+        ax_w.text(0.5, 1.01, f"{metodo} · Límite máx. 50% por activo",
+                  transform=ax_w.transAxes, ha="center",
+                  va="bottom", fontsize=8, color=_DIM)
+        ax_w.set_xlim(0, min(1.0, df_weights["Peso"].max() + 0.18))
+        ax_w.invert_yaxis()
+
+        fig_w.tight_layout()
+        st.pyplot(fig_w)
+        plt.close(fig_w)
 
     with st.expander("📖 Interpretación – Pesos óptimos del portafolio recomendado"):
         st.markdown(
@@ -1327,30 +1392,72 @@ if st.session_state.analysis_done:
 
     _col1, _col2, _col3 = st.columns([0.5, 2, 0.5])
     with _col2:
-        fig2, ax2 = plt.subplots(figsize=(6, 4))
+        fig2, ax2 = plt.subplots(figsize=(8, 5), facecolor=_BG_DARK)
+        _dark_ax(ax2)
 
-        ax2.plot(r["efficient_vols"], r["efficient_rets"],
-                 linestyle="-", linewidth=2, label="Frontera eficiente")
-        ax2.scatter(r["vol_sharpe"], r["ret_sharpe"],
-                    s=90, marker="o", label="Sharpe Máximo")
-        ax2.scatter(r["vol_minvol"], r["ret_minvol"],
-                    s=90, marker="^", label="Mínima Volatilidad")
-        ax2.scatter(r["vol_equal"],  r["ret_equal"],
-                    s=90, marker="s", label="Pesos Iguales")
-        ax2.annotate("Sharpe Máximo",
-                     (r["vol_sharpe"], r["ret_sharpe"]),
-                     xytext=(8, 8), textcoords="offset points", fontweight="bold")
-        ax2.annotate("Mínima Volatilidad",
-                     (r["vol_minvol"], r["ret_minvol"]),
-                     xytext=(8, -12), textcoords="offset points", fontweight="bold")
-        ax2.annotate("Pesos Iguales",
-                     (r["vol_equal"], r["ret_equal"]),
-                     xytext=(8, 8), textcoords="offset points", fontweight="bold")
-        ax2.set_xlabel("Volatilidad anual (riesgo)")
-        ax2.set_ylabel("Retorno anual esperado")
-        ax2.set_title("Frontera eficiente y estrategias comparadas")
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
+        ev = np.array(r["efficient_vols"])
+        er = np.array(r["efficient_rets"])
+
+        # Zona sombreada = región factible (ineficiente)
+        ax2.fill_between(ev, er, alpha=0.09, color=_CYAN)
+        ax2.fill_between(ev, er.min() * 0.5, er, alpha=0.05, color=_CYAN)
+
+        # Curva de la frontera
+        ax2.plot(ev, er, color=_CYAN, linewidth=3,
+                 zorder=4, label="Frontera eficiente")
+
+        # Línea vertical en mínima varianza
+        ax2.axvline(r["vol_minvol"], color=_DIM, linewidth=0.8,
+                    linestyle=":", alpha=0.6)
+
+        # Etiqueta de zona ineficiente
+        mid_vol = (ev.min() + ev.max()) / 2
+        ax2.text(mid_vol, er.min() * 0.7,
+                 "Zona ineficiente\n(mismo riesgo, menos retorno)",
+                 color=_DIM, fontsize=8, ha="center", style="italic",
+                 bbox=dict(boxstyle="round,pad=0.4",
+                           fc=_BG_CARD, ec=_GRID, alpha=0.75))
+
+        # Puntos y anotaciones numeradas
+        _pts = [
+            (r["vol_sharpe"], r["ret_sharpe"], "① Sharpe Máximo",    _CYAN,   "o", (14,  6)),
+            (r["vol_minvol"], r["ret_minvol"], "② Mín. Volatilidad", _GREEN,  "^", (10, -26)),
+            (r["vol_equal"],  r["ret_equal"],  "③ Pesos Iguales",    _PURPLE, "s", (14,  6)),
+        ]
+        for vx, ry, label, col, mk, off in _pts:
+            ax2.scatter(vx, ry, color=col, s=160, marker=mk,
+                        edgecolors="white", linewidths=1.2, zorder=6)
+            ax2.annotate(
+                f"{label}\nRetorno: {ry:.1%}  ·  Riesgo: {vx:.1%}",
+                xy=(vx, ry), xytext=off, textcoords="offset points",
+                fontsize=8.5, color=col, fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.4",
+                          fc=_BG_CARD, ec=col, alpha=0.92),
+                arrowprops=dict(arrowstyle="-", color=col, lw=0.8)
+            )
+
+        ax2.xaxis.set_major_formatter(_PCT)
+        ax2.yaxis.set_major_formatter(_PCT)
+        ax2.set_xlabel("Volatilidad anual  (↑ más riesgo)", fontsize=10)
+        ax2.set_ylabel("Retorno anual esperado  (↑ mejor)", fontsize=10)
+        ax2.set_title("Frontera Eficiente de Markowitz",
+                      fontsize=13, fontweight="bold", color=_CYAN, pad=14)
+
+        _handles = [
+            plt.Line2D([0], [0], color=_CYAN,   linewidth=2.5,
+                       label="Frontera eficiente"),
+            plt.Line2D([0], [0], color=_CYAN,   marker="o",
+                       linestyle="None", markersize=8, label="① Sharpe Máximo"),
+            plt.Line2D([0], [0], color=_GREEN,  marker="^",
+                       linestyle="None", markersize=8, label="② Mín. Volatilidad"),
+            plt.Line2D([0], [0], color=_PURPLE, marker="s",
+                       linestyle="None", markersize=8, label="③ Pesos Iguales"),
+        ]
+        ax2.legend(handles=_handles, facecolor=_BG_CARD,
+                   edgecolor=_GRID, labelcolor=_TEXT,
+                   fontsize=8.5, loc="lower right")
+
+        fig2.tight_layout()
         st.pyplot(fig2)
         plt.close(fig2)
 
