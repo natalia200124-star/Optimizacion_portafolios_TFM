@@ -676,60 +676,60 @@ if st.session_state.analysis_done:
         """)
 
     # =====================================================================
-    # MONTE CARLO — GRÁFICO CORREGIDO (4 fixes aplicados)
+    # MONTE CARLO — KDE SUAVIZADO, GRÁFICA ÚNICA
     # =====================================================================
     st.subheader("Simulación Monte Carlo – Análisis de riesgo forward-looking")
     st.dataframe(r["df_mc_stats"])
 
     _mc1, _mc2, _mc3 = st.columns([0.1, 3.5, 0.1])
     with _mc2:
+        from scipy.stats import gaussian_kde
+
         strat_colors = [COLORS["sharpe"], COLORS["minvol"], COLORS["equal"]]
         strat_names  = ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"]
 
-        # FIX 3: figsize altura aumentada de 5 a 6
-        fig_mc, axes = plt.subplots(1, 2, figsize=(14, 6))
-        apply_dark_style(fig_mc, axes)
-        fig_mc.suptitle("Distribución de Retornos Anuales Simulados (5,000 escenarios)",
+        fig_mc, ax = plt.subplots(figsize=(13, 6))
+        apply_dark_style(fig_mc, ax)
+        fig_mc.suptitle("Distribución de Retornos Anuales Simulados – KDE (5,000 escenarios)",
                          color=COLORS["sharpe"], fontsize=12, fontweight="bold", y=1.01)
 
-        for ax_i, (sims_dict, var_dict, cvar_dict, title) in enumerate([
-            (r["mc_simulations_mc"],   r["mc_var_mc"],  r["mc_cvar_mc"],  "Monte Carlo Paramétrico"),
-            (r["mc_simulations_boot"], r["mc_var_bt"],  r["mc_cvar_bt"],  "Bootstrap Histórico"),
-        ]):
-            ax = axes[ax_i]
+        # Usamos Monte Carlo paramétrico como fuente principal del KDE
+        sims_dict = r["mc_simulations_mc"]
+        var_dict  = r["mc_var_mc"]
 
-            for name, color in zip(strat_names, strat_colors):
-                sims = sims_dict[name]
-                # FIX 4: bins=60, range recortado a percentil 0.5–99.5 para eliminar outliers
-                ax.hist(sims, bins=60, alpha=0.5, label=name, color=color, density=True,
-                        edgecolor="none", linewidth=0,
-                        range=(np.percentile(sims, 0.5), np.percentile(sims, 99.5)))
-                # Línea VaR punteada
-                var_val = var_dict[name]
-                ax.axvline(var_val, color=color, linestyle="--", linewidth=1.4, alpha=0.9,
-                           label=f"VaR {name[:6]} = {var_val:.1%}")
+        for name, color in zip(strat_names, strat_colors):
+            sims = sims_dict[name]
+            # Rango limpio: percentil 0.5 – 99.5
+            x_min = np.percentile(sims, 0.5)
+            x_max = np.percentile(sims, 99.5)
+            x_grid = np.linspace(x_min, x_max, 400)
 
-            # Línea del cero
-            ax.axvline(0, color="white", linestyle="-", linewidth=1.8, alpha=0.4)
-            # FIX 1: etiqueta "0%" usando transform correcto, sin get_ylim() prematuro
-            ax.text(0, 1.0, "0%", color="white", fontsize=7, alpha=0.6,
-                    transform=ax.get_xaxis_transform(),
-                    ha="center", va="bottom")
+            kde = gaussian_kde(sims, bw_method=0.15)
+            y_kde = kde(x_grid)
 
-            ax.set_title(title, fontsize=10, fontweight="bold", pad=8)
-            ax.set_xlabel("Retorno anual simulado", fontsize=9)
-            ax.set_ylabel("Densidad de probabilidad", fontsize=9)
-            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
+            # Curva KDE principal
+            ax.plot(x_grid, y_kde, color=color, linewidth=2.2, label=name, zorder=3)
+            # Área bajo la curva semitransparente
+            ax.fill_between(x_grid, y_kde, alpha=0.12, color=color, zorder=2)
 
-            # FIX 2: leyenda con ncol=1 y bbox_to_anchor para no tapar los histogramas
-            legend = ax.legend(fontsize=6.5, facecolor="#252d3f", edgecolor=COLORS["border"],
-                               labelcolor=COLORS["text"], loc="upper left", ncol=1,
-                               framealpha=0.9, bbox_to_anchor=(0.01, 0.99))
+            # Línea VaR vertical
+            var_val = var_dict[name]
+            ax.axvline(var_val, color=color, linestyle="--", linewidth=1.4, alpha=0.85,
+                       label=f"VaR {name[:6]} = {var_val:.1%}", zorder=4)
 
-        # FIX 3 (continuación): forzar eje Y desde 0 después de graficar
-        for ax in axes:
-            ax.set_ylim(bottom=0)
-            ax.autoscale(axis='y')
+        # Línea del cero
+        ax.axvline(0, color="white", linestyle="-", linewidth=1.6, alpha=0.45, zorder=5)
+        ax.text(0, 1.0, "0%", color="white", fontsize=8, alpha=0.7,
+                transform=ax.get_xaxis_transform(), ha="center", va="bottom")
+
+        ax.set_xlabel("Retorno anual simulado", fontsize=10)
+        ax.set_ylabel("Densidad de probabilidad", fontsize=10)
+        ax.set_ylim(bottom=0)
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
+
+        ax.legend(fontsize=8, facecolor="#252d3f", edgecolor=COLORS["border"],
+                  labelcolor=COLORS["text"], loc="upper left", ncol=2,
+                  framealpha=0.9, bbox_to_anchor=(0.01, 0.99))
 
         plt.tight_layout()
         st.pyplot(fig_mc)
@@ -886,11 +886,6 @@ if st.session_state.analysis_done:
                 color=COLORS["text"], fontweight="600"
             )
 
-        # Línea de peso igual de referencia
-        equal_w = 100 / n_w
-        ax_w.axvline(equal_w, color="white", linestyle="--", linewidth=1,
-                     alpha=0.35, label=f"Peso igual ({equal_w:.1f}%)")
-
         ax_w.set_xlabel("Peso en el portafolio (%)", fontsize=9)
         ax_w.set_xlim(0, max(pesos_w) * 1.22)
         ax_w.set_title(
@@ -898,8 +893,6 @@ if st.session_state.analysis_done:
             fontsize=10, fontweight="bold", pad=10
         )
         ax_w.invert_yaxis()
-        ax_w.legend(fontsize=8, facecolor="#252d3f", edgecolor=COLORS["border"],
-                    labelcolor=COLORS["text"], loc="lower right")
 
         plt.tight_layout()
         st.pyplot(fig_w)
@@ -1139,6 +1132,7 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
