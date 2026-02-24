@@ -9,6 +9,13 @@ import requests
 import os
 
 # =========================
+# CORRECCIÓN 3 — RISK_FREE_RATE fuera de la función cacheada
+# Al estar aquí, un cambio en este valor se aplica de inmediato
+# sin necesidad de limpiar el caché manualmente.
+# =========================
+RISK_FREE_RATE = 0.045  # T-Bill 3 meses ~4.5%
+
+# =========================
 # DISEÑO PROFESIONAL
 # =========================
 st.set_page_config(
@@ -148,12 +155,6 @@ if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []
 
 
-# =========================
-# CAMBIO 1: FUNCIÓN CACHEADA
-# Toda la lógica pesada (descarga + cálculos + optimizaciones) vive aquí.
-# Streamlit la cachea: si tickers y años no cambian, devuelve el resultado
-# guardado sin repetir ningún cálculo ni descarga.
-# =========================
 @st.cache_data(show_spinner="Descargando datos y optimizando portafolio…")
 def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
@@ -161,7 +162,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 1.5) DESCARGA Y DEPURACIÓN DE DATOS (SIN LOOK-AHEAD BIAS)
-    # CAMBIO 2: una sola llamada a yf.download para activos + benchmarks
     # =====================================================================
     end_date   = datetime.today()
     start_date = end_date.replace(year=end_date.year - years)
@@ -177,24 +177,17 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         progress=False
     )
 
-    # Usar precios ajustados (corrige splits y dividendos)
     raw_data = raw_data["Adj Close"]
 
-    # En caso de MultiIndex
     if isinstance(raw_data.columns, pd.MultiIndex):
         raw_data = raw_data.droplevel(0, axis=1)
 
-    # Ordenar por fecha (seguridad)
     raw_data = raw_data.sort_index()
-
-    # Rellenar valores faltantes SOLO hacia adelante
     raw_data = raw_data.ffill()
 
-    # Separar activos del portafolio y benchmarks
     data           = raw_data[tickers].copy()
     benchmark_data = raw_data[benchmark_tickers].copy()
 
-    # Detectar tickers con datos insuficientes
     tickers_invalidos = [t for t in tickers if data[t].isnull().mean() > 0.2]
     if tickers_invalidos:
         raise ValueError(
@@ -203,7 +196,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
             f"Elimínalos e intente de nuevo."
         )
 
-    # Eliminar filas que sigan incompletas (inicio de la serie)
     data           = data.dropna()
     benchmark_data = benchmark_data.ffill().dropna()
 
@@ -224,23 +216,18 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # =====================================================================
     # 3) FUNCIONES DE OPTIMIZACIÓN
     # =====================================================================
-
-    # Tasa libre de riesgo anualizada (proxy: T-Bill 3 meses ~4.5%)
-    # Se usa en Sharpe para no sobreestimar el ratio con rf=0
-    RISK_FREE_RATE = 0.045
-
     def performance(weights, mean_ret, cov):
         ret    = np.dot(weights, mean_ret)
         vol    = np.sqrt(weights.T @ cov @ weights)
-        # FIX: Sharpe correcto resta la tasa libre de riesgo
         sharpe = (ret - RISK_FREE_RATE) / vol if vol > 0 else 0
         return ret, vol, sharpe
 
+    # CORRECCIÓN 2 — neg_sharpe: la condición de guarda verifica vol > 0,
+    # no sharpe != 0. Si el Sharpe es 0 de forma legítima (retorno = rf),
+    # la condición anterior devolvía 1e6 y rompía la optimización.
     def neg_sharpe(weights):
-        # FIX: usa el Sharpe de performance() que ya incluye rf,
-        # en vez de recalcular r/v ignorando la tasa libre de riesgo
-        _, _, sharpe = performance(weights, mean_returns_annual, cov_annual)
-        return -sharpe if sharpe != 0 else 1e6
+        _, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
+        return -sharpe if vol_val > 0 else 1e6
 
     def vol(weights):
         return np.sqrt(weights.T @ cov_annual @ weights)
@@ -295,7 +282,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     dd_equal  = max_drawdown(cum_equal)
 
     # =====================================================================
-    # 5.1) BENCHMARKS DE MERCADO (ya descargados arriba — CAMBIO 2)
+    # 5.1) BENCHMARKS DE MERCADO
     # =====================================================================
     benchmark_returns = benchmark_data.pct_change().dropna()
     benchmark_cum     = (1 + benchmark_returns).cumprod()
@@ -361,17 +348,15 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     })
 
     # =====================================================================
-    # 8.3) SORTINO RATIO — cálculo correcto sobre retornos del portafolio
-    # FIX: la desviación bajista debe calcularse sobre los retornos diarios
-    # del portafolio completo (daily_sharpe, etc.), NO como suma ponderada
-    # de desviaciones bajistas individuales. El método anterior ignoraba
-    # las correlaciones entre activos en días malos.
+    # 8.3) SORTINO RATIO
+    # CORRECCIÓN 1 — downside_dev usa RMS (raíz cuadrática media) sobre
+    # los retornos negativos del portafolio, no std() con ceros artificiales.
+    # std() calcula dispersión alrededor de la media de la serie mezclada,
+    # no alrededor de cero que es lo matemáticamente correcto para Sortino.
     # =====================================================================
     def sortino_ratio(ret_anual, daily_portfolio_returns):
-        downside     = daily_portfolio_returns.copy()
-        downside[downside > 0] = 0
-        downside_dev = downside.std() * np.sqrt(252)
-        # También se resta rf, igual que en Sharpe
+        downside     = np.minimum(daily_portfolio_returns, 0)
+        downside_dev = np.sqrt((downside ** 2).mean()) * np.sqrt(252)
         return (ret_anual - RISK_FREE_RATE) / downside_dev if downside_dev > 0 else np.nan
 
     df_sortino = pd.DataFrame({
@@ -385,10 +370,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 8.5) TABLA BENCHMARKS
-    # FIX: annualized_return ahora usa media aritmética * 252, igual que
-    # ret_sharpe / ret_minvol / ret_equal, para que la tabla de comparación
-    # no mezcle metodologías (antes usaba CAGR geométrico para benchmarks
-    # y aritmético para estrategias, creando diferencias artificiales).
     # =====================================================================
     benchmarks = {
         "S&P 500 (SPY)":     "SPY",
@@ -397,7 +378,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     }
 
     def annualized_return(daily_returns_series):
-        # Consistente con mean_returns_annual = mean_returns_daily * 252
         return daily_returns_series.mean() * 252
 
     def annualized_vol(series):
@@ -405,7 +385,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     benchmark_summary = []
     for name, ticker in benchmarks.items():
-        ret = annualized_return(benchmark_returns[ticker])   # retornos diarios
+        ret = annualized_return(benchmark_returns[ticker])
         v   = annualized_vol(benchmark_returns[ticker])
         dd  = max_drawdown(benchmark_cum[ticker])
         benchmark_summary.append({
@@ -455,7 +435,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         }
     }
 
-    # Ponderación temporal (años recientes pesan más)
     df_strategies = pd.DataFrame({
         "Sharpe Máximo":      daily_sharpe,
         "Mínima Volatilidad": daily_minvol,
@@ -477,7 +456,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     )
     best = weighted_performance.idxmax()
 
-    # Pesos finales según recomendación
     n_assets = len(tickers)
     if best == "Sharpe Máximo":
         final_weights = weights_sharpe
@@ -573,13 +551,6 @@ years = st.slider(
     value=6
 )
 
-# =========================
-# BOTÓN — FIX DOBLE RERENDER
-# El botón guarda el resultado en session_state y llama st.rerun()
-# inmediatamente. Esto hace que el siguiente render sea limpio:
-# el botón ya no está presionado, analysis_done=True, y los
-# resultados se renderizan una sola vez desde el bloque único de abajo.
-# =========================
 if st.button("Ejecutar optimización"):
     tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
     if len(tickers) < 2:
@@ -590,17 +561,12 @@ if st.button("Ejecutar optimización"):
             st.session_state.analysis_results = resultado
             st.session_state.analysis_done    = True
             st.session_state.chat_messages    = []
-            st.rerun()   # ← FIX: fuerza un rerender limpio y evita el doble ciclo
+            st.rerun()
         except ValueError as e:
             st.error(str(e))
         except Exception as e:
             st.error(f"Error: {e}")
 
-# =========================
-# BLOQUE ÚNICO DE RESULTADOS
-# Se eliminó el segundo bloque "MOSTRAR RESULTADOS" que duplicaba
-# el renderizado. Todos los resultados viven aquí, en un solo lugar.
-# =========================
 if st.session_state.analysis_done:
 
     r = st.session_state.analysis_results
@@ -963,7 +929,7 @@ if st.session_state.analysis_done:
         ax.barh(df_weights["Ticker"], df_weights["Peso"])
         ax.set_title(f"Composición del portafolio recomendado\n({metodo})")
         st.pyplot(fig)
-        plt.close(fig)   # CAMBIO 4: liberar memoria de matplotlib
+        plt.close(fig)
 
     with st.expander("📖 Interpretación – Pesos óptimos del portafolio recomendado"):
         st.markdown(
@@ -1105,7 +1071,7 @@ if st.session_state.analysis_done:
         ax2.legend()
         ax2.grid(True, alpha=0.3)
         st.pyplot(fig2)
-        plt.close(fig2)   # CAMBIO 4: liberar memoria de matplotlib
+        plt.close(fig2)
 
     with st.expander("📖 Interpretación – Frontera eficiente de Markowitz"):
         st.markdown(
