@@ -7,11 +7,10 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import requests
 import os
+from sklearn.covariance import LedoitWolf  # MEJORA: covarianza robusta
 
 # =========================
-# CORRECCIÓN 3 — RISK_FREE_RATE fuera de la función cacheada
-# Al estar aquí, un cambio en este valor se aplica de inmediato
-# sin necesidad de limpiar el caché manualmente.
+# RISK_FREE_RATE fuera de la función cacheada
 # =========================
 RISK_FREE_RATE = 0.045  # T-Bill 3 meses ~4.5%
 
@@ -160,6 +159,11 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     tickers = list(tickers_tuple)
 
+    # ── Parámetros globales de las mejoras ────────────────────────────────
+    LAMBDA_REG    = 0.01    # Regularización L2 — simétrica en Sharpe y MinVol
+    N_SIMULATIONS = 15000   # REC 6: subir a 15,000 para reducir ruido Monte Carlo
+    MAX_WEIGHT    = 0.50    # REC 8: límite máximo por activo (evita concentraciones)
+
     # =====================================================================
     # 1.5) DESCARGA Y DEPURACIÓN DE DATOS (SIN LOOK-AHEAD BIAS)
     # =====================================================================
@@ -203,15 +207,25 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         raise ValueError("No hay datos suficientes para el periodo seleccionado.")
 
     # =====================================================================
-    # 2) RETORNOS Y MATRICES
+    # 2) RETORNOS LOGARÍTMICOS Y MATRICES
+    # Retornos log: aditivos en el tiempo, mejor fundamento estadístico.
+    # Acumulación correcta: exp(cumsum()) — NO (1+r).cumprod()
     # =====================================================================
-    returns            = data.pct_change().dropna()
+    returns            = np.log(data / data.shift(1)).dropna()
     mean_returns_daily = returns.mean()
-    cov_daily          = returns.cov()
 
     trading_days        = 252
     mean_returns_annual = mean_returns_daily * trading_days
-    cov_annual          = cov_daily          * trading_days
+
+    # Ledoit-Wolf Shrinkage: reduce ruido en la covarianza
+    lw = LedoitWolf()
+    lw.fit(returns)
+    cov_daily  = pd.DataFrame(
+        lw.covariance_,
+        index=returns.columns,
+        columns=returns.columns
+    )
+    cov_annual = cov_daily * trading_days
 
     # =====================================================================
     # 3) FUNCIONES DE OPTIMIZACIÓN
@@ -222,24 +236,28 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         sharpe = (ret - RISK_FREE_RATE) / vol if vol > 0 else 0
         return ret, vol, sharpe
 
-    # CORRECCIÓN 2 — neg_sharpe: la condición de guarda verifica vol > 0,
-    # no sharpe != 0. Si el Sharpe es 0 de forma legítima (retorno = rf),
-    # la condición anterior devolvía 1e6 y rompía la optimización.
+    # REC 1 OBLIGATORIO: regularización L2 simétrica en AMBAS funciones.
+    # Sin esto el modelo es asimétrico: MinVol penaliza concentración
+    # pero Sharpe no, lo que sesga la comparación entre estrategias.
     def neg_sharpe(weights):
-        _, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
-        return -sharpe if vol_val > 0 else 1e6
+        ret, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
+        penalty = LAMBDA_REG * np.sum(weights ** 2)
+        return -(sharpe - penalty) if vol_val > 0 else 1e6
 
-    def vol(weights):
-        return np.sqrt(weights.T @ cov_annual @ weights)
+    def vol_obj(weights):
+        variance = weights.T @ cov_annual @ weights
+        penalty  = LAMBDA_REG * np.sum(weights ** 2)
+        return np.sqrt(variance) + penalty
 
     def max_drawdown(series):
         cumulative_max = series.cummax()
         drawdown       = (series / cumulative_max) - 1
         return drawdown.min()
 
-    n           = len(tickers)
-    x0          = np.repeat(1 / n, n)
-    bounds      = tuple((0, 1) for _ in range(n))
+    n      = len(tickers)
+    x0     = np.repeat(1 / n, n)
+    # REC 8: límite máximo del 50% por activo — evita concentraciones irreales
+    bounds      = tuple((0, MAX_WEIGHT) for _ in range(n))
     constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
 
     # =====================================================================
@@ -252,7 +270,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         weights_sharpe, mean_returns_annual, cov_annual
     )
 
-    res_minvol     = minimize(vol, x0, method="SLSQP",
+    res_minvol     = minimize(vol_obj, x0, method="SLSQP",
                               bounds=bounds, constraints=constraints)
     weights_minvol = res_minvol.x
     ret_minvol, vol_minvol, sharpe_minvol = performance(
@@ -265,17 +283,18 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     )
 
     # =====================================================================
-    # 5) RENDIMIENTOS DE CADA ESTRATEGIA
+    # 5) RENDIMIENTOS ACUMULADOS
+    # REC 2 OBLIGATORIO: exp(cumsum()) para retornos log — nunca (1+r).cumprod()
     # =====================================================================
-    cumulative_assets = (1 + returns).cumprod()
+    cumulative_assets = np.exp(returns.cumsum())
 
     daily_sharpe = returns.dot(weights_sharpe)
     daily_minvol = returns.dot(weights_minvol)
     daily_equal  = returns.dot(weights_equal)
 
-    cum_sharpe = (1 + daily_sharpe).cumprod()
-    cum_minvol = (1 + daily_minvol).cumprod()
-    cum_equal  = (1 + daily_equal).cumprod()
+    cum_sharpe = np.exp(daily_sharpe.cumsum())
+    cum_minvol = np.exp(daily_minvol.cumsum())
+    cum_equal  = np.exp(daily_equal.cumsum())
 
     dd_sharpe = max_drawdown(cum_sharpe)
     dd_minvol = max_drawdown(cum_minvol)
@@ -284,8 +303,10 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # =====================================================================
     # 5.1) BENCHMARKS DE MERCADO
     # =====================================================================
-    benchmark_returns = benchmark_data.pct_change().dropna()
-    benchmark_cum     = (1 + benchmark_returns).cumprod()
+    benchmark_log_returns = np.log(
+        benchmark_data / benchmark_data.shift(1)
+    ).dropna()
+    benchmark_cum = np.exp(benchmark_log_returns.cumsum())
 
     # =====================================================================
     # 6) FRONTERA EFICIENTE
@@ -303,7 +324,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
             {"type": "eq",
              "fun": lambda w, targ=targ: np.dot(w, mean_returns_annual) - targ}
         )
-        res = minimize(vol, x0, method="SLSQP",
+        res = minimize(vol_obj, x0, method="SLSQP",
                        bounds=bounds, constraints=cons)
         if res.success:
             r, v, _ = performance(res.x, mean_returns_annual, cov_annual)
@@ -349,10 +370,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 8.3) SORTINO RATIO
-    # CORRECCIÓN 1 — downside_dev usa RMS (raíz cuadrática media) sobre
-    # los retornos negativos del portafolio, no std() con ceros artificiales.
-    # std() calcula dispersión alrededor de la media de la serie mezclada,
-    # no alrededor de cero que es lo matemáticamente correcto para Sortino.
     # =====================================================================
     def sortino_ratio(ret_anual, daily_portfolio_returns):
         downside     = np.minimum(daily_portfolio_returns, 0)
@@ -366,6 +383,70 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
             sortino_ratio(ret_minvol, daily_minvol),
             sortino_ratio(ret_equal,  daily_equal)
         ]
+    })
+
+    # =====================================================================
+    # 8.3.5) SIMULACIÓN MONTE CARLO + BOOTSTRAP HISTÓRICO
+    # REC 4 OBLIGATORIO: simulación multivariada (no por separado)
+    # REC 5: Bootstrap histórico para no depender solo de normalidad
+    # REC 6: 15,000 simulaciones para reducir ruido estadístico
+    # =====================================================================
+    np.random.seed(42)
+
+    # — Monte Carlo paramétrico (normal multivariada) —
+    sim_assets_mc = np.random.multivariate_normal(
+        mean_returns_annual.values,
+        cov_annual.values,
+        N_SIMULATIONS
+    )
+    sim_sharpe_mc = sim_assets_mc @ weights_sharpe
+    sim_minvol_mc = sim_assets_mc @ weights_minvol
+    sim_equal_mc  = sim_assets_mc @ weights_equal
+
+    # — Bootstrap histórico: remuestrea bloques de retornos reales —
+    # No asume distribución normal; usa los retornos observados directamente.
+    n_obs        = len(returns)
+    block_size   = 20   # bloques de 20 días para preservar autocorrelación
+    n_blocks     = (N_SIMULATIONS * trading_days) // block_size + 1
+    block_starts = np.random.randint(0, n_obs - block_size, size=n_blocks)
+
+    boot_rows = []
+    for start in block_starts:
+        boot_rows.append(returns.iloc[start : start + block_size].values)
+    boot_returns = np.vstack(boot_rows)[:N_SIMULATIONS * trading_days]
+    boot_returns = boot_returns.reshape(N_SIMULATIONS, trading_days, n)
+
+    sim_sharpe_boot = boot_returns @ weights_sharpe
+    sim_minvol_boot = boot_returns @ weights_minvol
+    sim_equal_boot  = boot_returns @ weights_equal
+
+    # Retorno anual bootstrap = suma de log-retornos diarios en el año
+    sim_sharpe_boot = sim_sharpe_boot.sum(axis=1)
+    sim_minvol_boot = sim_minvol_boot.sum(axis=1)
+    sim_equal_boot  = sim_equal_boot.sum(axis=1)
+
+    def var_cvar(simulated, alpha=0.05):
+        var          = np.percentile(simulated, alpha * 100)
+        cvar         = simulated[simulated <= var].mean()
+        prob_perdida = (simulated < 0).mean()
+        return var, cvar, prob_perdida
+
+    var_s_mc,  cvar_s_mc,  prob_s_mc  = var_cvar(sim_sharpe_mc)
+    var_m_mc,  cvar_m_mc,  prob_m_mc  = var_cvar(sim_minvol_mc)
+    var_e_mc,  cvar_e_mc,  prob_e_mc  = var_cvar(sim_equal_mc)
+
+    var_s_bt,  cvar_s_bt,  prob_s_bt  = var_cvar(sim_sharpe_boot)
+    var_m_bt,  cvar_m_bt,  prob_m_bt  = var_cvar(sim_minvol_boot)
+    var_e_bt,  cvar_e_bt,  prob_e_bt  = var_cvar(sim_equal_boot)
+
+    df_mc_stats = pd.DataFrame({
+        "Estrategia":         ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
+        "VaR MC 95%":         [var_s_mc,  var_m_mc,  var_e_mc],
+        "CVaR MC 95%":        [cvar_s_mc, cvar_m_mc, cvar_e_mc],
+        "Prob. Pérdida MC":   [prob_s_mc, prob_m_mc, prob_e_mc],
+        "VaR Boot 95%":       [var_s_bt,  var_m_bt,  var_e_bt],
+        "CVaR Boot 95%":      [cvar_s_bt, cvar_m_bt, cvar_e_bt],
+        "Prob. Pérdida Boot": [prob_s_bt, prob_m_bt, prob_e_bt],
     })
 
     # =====================================================================
@@ -385,8 +466,8 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     benchmark_summary = []
     for name, ticker in benchmarks.items():
-        ret = annualized_return(benchmark_returns[ticker])
-        v   = annualized_vol(benchmark_returns[ticker])
+        ret = annualized_return(benchmark_log_returns[ticker])
+        v   = annualized_vol(benchmark_log_returns[ticker])
         dd  = max_drawdown(benchmark_cum[ticker])
         benchmark_summary.append({
             "Benchmark":         name,
@@ -408,6 +489,61 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "Nasdaq 100 (QQQ)":   benchmark_cum["QQQ"],
         "MSCI World (URTH)":  benchmark_cum["URTH"]
     })
+
+    # =====================================================================
+    # 8.7) ESTABILIDAD DE PESOS POR PERIODO — REC 9
+    # Re-optimiza usando ventanas de 3, 5 y los años completos
+    # para mostrar cuánto cambian los pesos según el horizonte.
+    # =====================================================================
+    def optimizar_en_ventana(ret_ventana):
+        """Devuelve (w_sharpe, w_minvol) para una sub-muestra de retornos."""
+        mr = ret_ventana.mean() * trading_days
+        lw_ = LedoitWolf()
+        lw_.fit(ret_ventana)
+        cov_ = pd.DataFrame(
+            lw_.covariance_ * trading_days,
+            index=ret_ventana.columns,
+            columns=ret_ventana.columns
+        )
+        n_  = len(ret_ventana.columns)
+        x0_ = np.repeat(1 / n_, n_)
+        bds = tuple((0, MAX_WEIGHT) for _ in range(n_))
+        con = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
+
+        def ns_(w):
+            r_ = np.dot(w, mr)
+            v_ = np.sqrt(w.T @ cov_ @ w)
+            sh = (r_ - RISK_FREE_RATE) / v_ if v_ > 0 else 0
+            pen = LAMBDA_REG * np.sum(w ** 2)
+            return -(sh - pen) if v_ > 0 else 1e6
+
+        def vo_(w):
+            return np.sqrt(w.T @ cov_ @ w) + LAMBDA_REG * np.sum(w ** 2)
+
+        ws = minimize(ns_, x0_, method="SLSQP", bounds=bds, constraints=con).x
+        wm = minimize(vo_, x0_, method="SLSQP", bounds=bds, constraints=con).x
+        return ws, wm
+
+    stability_rows = []
+    available_years = sorted(returns.index.year.unique())
+
+    for horizon in [3, 5, years]:
+        if horizon > len(available_years):
+            continue
+        cutoff = returns.index[-1] - pd.DateOffset(years=horizon)
+        ret_sub = returns[returns.index >= cutoff]
+        if len(ret_sub) < 252:
+            continue
+        ws_h, wm_h = optimizar_en_ventana(ret_sub)
+        for ticker, ws, wm in zip(tickers, ws_h, wm_h):
+            stability_rows.append({
+                "Horizonte":           f"{horizon} años",
+                "Ticker":              ticker,
+                "Peso Sharpe Máx (%)": round(ws * 100, 1),
+                "Peso Mín Vol (%)":    round(wm * 100, 1),
+            })
+
+    df_stability = pd.DataFrame(stability_rows) if stability_rows else pd.DataFrame()
 
     # =====================================================================
     # 9) SÍNTESIS ANALÍTICA PARA EL ASISTENTE
@@ -449,8 +585,9 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     }
     weights_series = years_index.map(year_weights)
 
+    # Uso exp(cumsum) — consistente con retornos log
     weighted_performance = (
-        (1 + df_strategies).cumprod()
+        np.exp(df_strategies.cumsum())
         .mul(weights_series, axis=0)
         .iloc[-1]
     )
@@ -488,6 +625,18 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "rolling_vol":        rolling_vol,
         "df_calmar":          df_calmar,
         "df_sortino":         df_sortino,
+        "df_mc_stats":        df_mc_stats,
+        "mc_simulations_mc": {
+            "Sharpe Máximo":      sim_sharpe_mc,
+            "Mínima Volatilidad": sim_minvol_mc,
+            "Pesos Iguales":      sim_equal_mc
+        },
+        "mc_simulations_boot": {
+            "Sharpe Máximo":      sim_sharpe_boot,
+            "Mínima Volatilidad": sim_minvol_boot,
+            "Pesos Iguales":      sim_equal_boot
+        },
+        "df_stability":       df_stability,
         "df_benchmarks":      df_benchmarks,
         "comparison_cum":     comparison_cum,
         "weighted_performance": weighted_performance,
@@ -763,6 +912,104 @@ if st.session_state.analysis_done:
             y más conservadora al proceso de toma de decisiones.
             """
         )
+
+    # =====================================================================
+    # 8.3.5) SIMULACIÓN MONTE CARLO + BOOTSTRAP HISTÓRICO
+    # =====================================================================
+    st.subheader("Simulación Monte Carlo – Análisis de riesgo forward-looking")
+    st.dataframe(r["df_mc_stats"])
+
+    _mc1, _mc2, _mc3 = st.columns([0.3, 2.5, 0.3])
+    with _mc2:
+        fig_mc, axes = plt.subplots(1, 2, figsize=(12, 4))
+        colors = ["#00d9ff", "#66ff99", "#ff9966"]
+
+        for ax, sims_dict, title in [
+            (axes[0], r["mc_simulations_mc"],   "Monte Carlo paramétrico (15,000 sim.)"),
+            (axes[1], r["mc_simulations_boot"],  "Bootstrap histórico (15,000 sim.)")
+        ]:
+            for (name, sims), color in zip(sims_dict.items(), colors):
+                ax.hist(sims, bins=80, alpha=0.55, label=name, color=color)
+            ax.axvline(0, color="white", linestyle="--", linewidth=1.2, alpha=0.7)
+            ax.set_xlabel("Retorno anual simulado")
+            ax.set_ylabel("Frecuencia")
+            ax.set_title(title)
+            ax.legend(fontsize=8)
+            ax.grid(True, alpha=0.2)
+
+        plt.tight_layout()
+        st.pyplot(fig_mc)
+        plt.close(fig_mc)
+
+    with st.expander("📖 Interpretación – Simulación Monte Carlo"):
+        st.markdown(
+        """
+        **Interpretación analítica de la Simulación Monte Carlo:**
+
+        La simulación genera 5.000 escenarios posibles de retorno anual para cada estrategia
+        utilizando la media y la matriz de covarianza estimadas. Esto permite evaluar el
+        comportamiento del portafolio bajo incertidumbre futura, no solo con datos históricos.
+
+        **¿Cómo interpretar las distribuciones?**
+
+        - Las curvas más desplazadas hacia la derecha indican mayor retorno esperado.
+        - Las distribuciones más estrechas reflejan menor volatilidad y mayor estabilidad.
+        - Una mayor concentración de valores a la izquierda del cero implica mayor probabilidad de pérdida.
+
+        **Métricas clave de riesgo extremo:**
+        - **VaR 95%:** pérdida máxima esperada en el 5% de los peores escenarios.
+        - **CVaR 95%:** promedio de las pérdidas en esos escenarios extremos.
+        - **Probabilidad de pérdida:** porcentaje de escenarios con retorno anual negativo.
+
+        **Monte Carlo vs Bootstrap:**
+        - El gráfico izquierdo asume distribución normal multivariada para generar escenarios.
+        - El gráfico derecho remuestrea bloques de retornos históricos reales, sin asumir normalidad.
+        - Si ambos coinciden, el resultado es más robusto. Si difieren, el Bootstrap suele ser más conservador
+          porque captura colas de distribución más gruesas (eventos extremos reales).
+
+        **Lectura estratégica:**
+
+        - El portafolio de **Sharpe Máximo** tiende a mostrar mayor retorno esperado,
+          aunque con mayor dispersión y exposición a escenarios adversos.
+        - El portafolio de **Mínima Volatilidad** presenta una distribución más compacta,
+          reduciendo la severidad de pérdidas extremas, pero con menor potencial de crecimiento.
+        - La estrategia de **Pesos Iguales** actúa como referencia neutral sin optimización específica.
+
+        En términos prácticos, la mejor estrategia dependerá del perfil del inversor:
+
+        - Si se prioriza maximizar retorno ajustado por riesgo → **Sharpe Máximo**.
+        - Si se prioriza estabilidad y control de pérdidas extremas → **Mínima Volatilidad**.
+
+        La decisión óptima surge del equilibrio entre retorno esperado y tolerancia al riesgo extremo.
+        """
+        )
+
+    # =====================================================================
+    # 8.3.7) ESTABILIDAD DE PESOS POR PERIODO — REC 9
+    # =====================================================================
+    if not r["df_stability"].empty:
+        st.subheader("Estabilidad de pesos por horizonte temporal")
+        st.dataframe(r["df_stability"], use_container_width=True)
+
+        with st.expander("📖 Interpretación – Estabilidad de pesos por periodo"):
+            st.markdown(
+                """
+                **Interpretación analítica de la estabilidad de pesos:**
+
+                Esta tabla muestra cómo cambian los pesos óptimos de cada activo
+                cuando se re-optimiza el portafolio usando ventanas históricas de
+                diferente longitud: 3, 5 y todos los años disponibles.
+
+                - Si los pesos son **similares entre horizontes**, la estrategia es
+                  **robusta**: no depende del periodo elegido y es más confiable.
+                - Si los pesos **varían mucho**, el portafolio es más sensible al
+                  periodo de entrenamiento, lo que indica mayor incertidumbre.
+
+                En una defensa técnica, la estabilidad de pesos es un argumento
+                clave: demuestra que la solución encontrada no es un artefacto
+                del periodo de datos, sino una estructura real del portafolio.
+                """
+            )
 
     # =====================================================================
     # 8.4) PERIODOS DE CRISIS (COVID 2020)
