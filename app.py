@@ -7,11 +7,10 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import requests
 import os
+from sklearn.covariance import LedoitWolf  # MEJORA 1: covarianza robusta
 
 # =========================
-# CORRECCIÓN 3 — RISK_FREE_RATE fuera de la función cacheada
-# Al estar aquí, un cambio en este valor se aplica de inmediato
-# sin necesidad de limpiar el caché manualmente.
+# RISK_FREE_RATE fuera de la función cacheada
 # =========================
 RISK_FREE_RATE = 0.045  # T-Bill 3 meses ~4.5%
 
@@ -160,6 +159,10 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     tickers = list(tickers_tuple)
 
+    # Parámetros de las mejoras
+    LAMBDA_REG    = 0.01   # MEJORA 2: fuerza de regularización L2
+    N_SIMULATIONS = 5000   # MEJORA 3: trayectorias Monte Carlo
+
     # =====================================================================
     # 1.5) DESCARGA Y DEPURACIÓN DE DATOS (SIN LOOK-AHEAD BIAS)
     # =====================================================================
@@ -204,14 +207,27 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 2) RETORNOS Y MATRICES
+    # MEJORA 4: retornos logarítmicos — mejor fundamento matemático.
+    # Son aditivos en el tiempo y simétricos, lo que mejora la estimación
+    # estadística de medias y covarianzas.
     # =====================================================================
-    returns            = data.pct_change().dropna()
+    returns            = np.log(data / data.shift(1)).dropna()
     mean_returns_daily = returns.mean()
-    cov_daily          = returns.cov()
 
     trading_days        = 252
     mean_returns_annual = mean_returns_daily * trading_days
-    cov_annual          = cov_daily          * trading_days
+
+    # MEJORA 1: Ledoit-Wolf Shrinkage
+    # Reduce el ruido en la matriz de covarianza acercándola a una estimación
+    # más estable. El 80% de la inestabilidad de Markowitz viene de aquí.
+    lw = LedoitWolf()
+    lw.fit(returns)
+    cov_daily  = pd.DataFrame(
+        lw.covariance_,
+        index=returns.columns,
+        columns=returns.columns
+    )
+    cov_annual = cov_daily * trading_days
 
     # =====================================================================
     # 3) FUNCIONES DE OPTIMIZACIÓN
@@ -222,15 +238,17 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         sharpe = (ret - RISK_FREE_RATE) / vol if vol > 0 else 0
         return ret, vol, sharpe
 
-    # CORRECCIÓN 2 — neg_sharpe: la condición de guarda verifica vol > 0,
-    # no sharpe != 0. Si el Sharpe es 0 de forma legítima (retorno = rf),
-    # la condición anterior devolvía 1e6 y rompía la optimización.
     def neg_sharpe(weights):
         _, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
         return -sharpe if vol_val > 0 else 1e6
 
+    # MEJORA 2: Regularización L2 en la función de volatilidad.
+    # Penaliza pesos muy concentrados (ej. 90% en un solo activo),
+    # produciendo portafolios más diversificados y estables fuera de muestra.
     def vol(weights):
-        return np.sqrt(weights.T @ cov_annual @ weights)
+        variance = weights.T @ cov_annual @ weights
+        penalty  = LAMBDA_REG * np.sum(weights ** 2)
+        return np.sqrt(variance) + penalty
 
     def max_drawdown(series):
         cumulative_max = series.cummax()
@@ -265,17 +283,18 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     )
 
     # =====================================================================
-    # 5) RENDIMIENTOS DE CADA ESTRATEGIA
+    # 5) RENDIMIENTOS ACUMULADOS
+    # Con retornos logarítmicos: exp(cumsum) equivale al producto de (1+r)
     # =====================================================================
-    cumulative_assets = (1 + returns).cumprod()
+    cumulative_assets = np.exp(returns.cumsum())
 
     daily_sharpe = returns.dot(weights_sharpe)
     daily_minvol = returns.dot(weights_minvol)
     daily_equal  = returns.dot(weights_equal)
 
-    cum_sharpe = (1 + daily_sharpe).cumprod()
-    cum_minvol = (1 + daily_minvol).cumprod()
-    cum_equal  = (1 + daily_equal).cumprod()
+    cum_sharpe = np.exp(daily_sharpe.cumsum())
+    cum_minvol = np.exp(daily_minvol.cumsum())
+    cum_equal  = np.exp(daily_equal.cumsum())
 
     dd_sharpe = max_drawdown(cum_sharpe)
     dd_minvol = max_drawdown(cum_minvol)
@@ -284,8 +303,10 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # =====================================================================
     # 5.1) BENCHMARKS DE MERCADO
     # =====================================================================
-    benchmark_returns = benchmark_data.pct_change().dropna()
-    benchmark_cum     = (1 + benchmark_returns).cumprod()
+    benchmark_log_returns = np.log(
+        benchmark_data / benchmark_data.shift(1)
+    ).dropna()
+    benchmark_cum = np.exp(benchmark_log_returns.cumsum())
 
     # =====================================================================
     # 6) FRONTERA EFICIENTE
@@ -349,10 +370,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 8.3) SORTINO RATIO
-    # CORRECCIÓN 1 — downside_dev usa RMS (raíz cuadrática media) sobre
-    # los retornos negativos del portafolio, no std() con ceros artificiales.
-    # std() calcula dispersión alrededor de la media de la serie mezclada,
-    # no alrededor de cero que es lo matemáticamente correcto para Sortino.
     # =====================================================================
     def sortino_ratio(ret_anual, daily_portfolio_returns):
         downside     = np.minimum(daily_portfolio_returns, 0)
@@ -366,6 +383,40 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
             sortino_ratio(ret_minvol, daily_minvol),
             sortino_ratio(ret_equal,  daily_equal)
         ]
+    })
+
+    # =====================================================================
+    # 8.3.5) SIMULACIÓN MONTE CARLO — MEJORA 3
+    # Simula 5,000 escenarios de retorno anual usando la distribución
+    # normal multivariada estimada con los parámetros del portafolio.
+    # Calcula VaR y CVaR al 95% de confianza para cada estrategia.
+    # =====================================================================
+    np.random.seed(42)
+    sim_assets = np.random.multivariate_normal(
+        mean_returns_annual.values,
+        cov_annual.values,
+        N_SIMULATIONS
+    )
+
+    sim_sharpe = sim_assets @ weights_sharpe
+    sim_minvol = sim_assets @ weights_minvol
+    sim_equal  = sim_assets @ weights_equal
+
+    def var_cvar(simulated, alpha=0.05):
+        var          = np.percentile(simulated, alpha * 100)
+        cvar         = simulated[simulated <= var].mean()
+        prob_perdida = (simulated < 0).mean()
+        return var, cvar, prob_perdida
+
+    var_s, cvar_s, prob_s = var_cvar(sim_sharpe)
+    var_m, cvar_m, prob_m = var_cvar(sim_minvol)
+    var_e, cvar_e, prob_e = var_cvar(sim_equal)
+
+    df_mc_stats = pd.DataFrame({
+        "Estrategia":    ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
+        "VaR 95%":       [var_s, var_m, var_e],
+        "CVaR 95%":      [cvar_s, cvar_m, cvar_e],
+        "Prob. Pérdida": [prob_s, prob_m, prob_e]
     })
 
     # =====================================================================
@@ -385,8 +436,8 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     benchmark_summary = []
     for name, ticker in benchmarks.items():
-        ret = annualized_return(benchmark_returns[ticker])
-        v   = annualized_vol(benchmark_returns[ticker])
+        ret = annualized_return(benchmark_log_returns[ticker])
+        v   = annualized_vol(benchmark_log_returns[ticker])
         dd  = max_drawdown(benchmark_cum[ticker])
         benchmark_summary.append({
             "Benchmark":         name,
@@ -488,6 +539,12 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "rolling_vol":        rolling_vol,
         "df_calmar":          df_calmar,
         "df_sortino":         df_sortino,
+        "df_mc_stats":        df_mc_stats,
+        "mc_simulations": {
+            "Sharpe Máximo":      sim_sharpe,
+            "Mínima Volatilidad": sim_minvol,
+            "Pesos Iguales":      sim_equal
+        },
         "df_benchmarks":      df_benchmarks,
         "comparison_cum":     comparison_cum,
         "weighted_performance": weighted_performance,
@@ -761,6 +818,53 @@ if st.session_state.analysis_done:
             identificar qué estrategia ofrece una **mejor compensación entre
             retorno y riesgo negativo**, aportando una visión complementaria
             y más conservadora al proceso de toma de decisiones.
+            """
+        )
+
+    # =====================================================================
+    # 8.3.5) SIMULACIÓN MONTE CARLO
+    # =====================================================================
+    st.subheader("Simulación Monte Carlo – Análisis de riesgo forward-looking")
+    st.dataframe(r["df_mc_stats"])
+
+    _mc1, _mc2, _mc3 = st.columns([0.3, 2.5, 0.3])
+    with _mc2:
+        fig_mc, ax_mc = plt.subplots(figsize=(8, 4))
+        colors = ["#00d9ff", "#66ff99", "#ff9966"]
+        for (name, sims), color in zip(r["mc_simulations"].items(), colors):
+            ax_mc.hist(sims, bins=80, alpha=0.55, label=name, color=color)
+        ax_mc.axvline(0, color="white", linestyle="--", linewidth=1.2, alpha=0.7)
+        ax_mc.set_xlabel("Retorno anual simulado")
+        ax_mc.set_ylabel("Frecuencia")
+        ax_mc.set_title("Distribución de retornos anuales – Monte Carlo (5,000 simulaciones)")
+        ax_mc.legend()
+        ax_mc.grid(True, alpha=0.2)
+        st.pyplot(fig_mc)
+        plt.close(fig_mc)
+
+    with st.expander("📖 Interpretación – Simulación Monte Carlo"):
+        st.markdown(
+            """
+            **Interpretación analítica de la Simulación Monte Carlo:**
+
+            Esta simulación genera 5,000 escenarios posibles de retorno anual
+            para cada estrategia, usando la media y la covarianza estimadas
+            de los activos. Permite evaluar el riesgo de forma **prospectiva**,
+            no solo histórica.
+
+            **Métricas clave:**
+            - **VaR 95% (Value at Risk):** pérdida máxima esperada en el 5%
+              de los peores escenarios. Si el VaR es -15%, significa que en
+              el 5% de los casos se podría perder al menos un 15%.
+            - **CVaR 95% (Expected Shortfall):** promedio de las pérdidas en
+              ese 5% más adverso. Más conservador que el VaR porque refleja
+              la severidad de los escenarios extremos.
+            - **Probabilidad de pérdida:** porcentaje de escenarios donde el
+              portafolio termina en negativo en el año.
+
+            La línea vertical blanca marca el punto de retorno cero.
+            Las distribuciones más desplazadas hacia la derecha y más estrechas
+            indican estrategias con mejor perfil de riesgo esperado.
             """
         )
 
