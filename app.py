@@ -7,36 +7,11 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import requests
 import os
-from sklearn.covariance import LedoitWolf  # MEJORA 1: covarianza robusta
-from scipy.stats import gaussian_kde
-from matplotlib.ticker import FuncFormatter
-
-# ── Paleta de diseño oscuro (coherente con el tema de la app) ──────────────
-_BG_DARK  = "#0f1419"
-_BG_PANEL = "#1a1f2e"
-_BG_CARD  = "#1e2433"
-_CYAN     = "#00d9ff"
-_GREEN    = "#66ff99"
-_PURPLE   = "#b388ff"
-_ORANGE   = "#ff9966"
-_GRID     = "#2a3347"
-_TEXT     = "#e1e7ed"
-_DIM      = "#7a8499"
-_PCT      = FuncFormatter(lambda x, _: f"{x:.0%}")
-
-def _dark_ax(ax):
-    """Aplica el tema oscuro de la app a un eje de matplotlib."""
-    ax.set_facecolor(_BG_PANEL)
-    for sp in ax.spines.values():
-        sp.set_edgecolor(_GRID)
-    ax.tick_params(colors=_DIM, labelsize=9)
-    ax.xaxis.label.set_color(_TEXT)
-    ax.yaxis.label.set_color(_TEXT)
-    ax.grid(True, color=_GRID, linewidth=0.6, alpha=0.7)
-    return ax
 
 # =========================
-# RISK_FREE_RATE fuera de la función cacheada
+# CORRECCIÓN 3 — RISK_FREE_RATE fuera de la función cacheada
+# Al estar aquí, un cambio en este valor se aplica de inmediato
+# sin necesidad de limpiar el caché manualmente.
 # =========================
 RISK_FREE_RATE = 0.045  # T-Bill 3 meses ~4.5%
 
@@ -185,12 +160,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     tickers = list(tickers_tuple)
 
-    # Parámetros de las mejoras
-    LAMBDA_REG    = 0.01    # MEJORA 2: fuerza de regularización L2
-    N_SIMULATIONS = 15000   # MEJORA 6: 15,000 trayectorias para reducir ruido estadístico
-    N_BOOTSTRAP   = 15000   # MEJORA 5: muestras Bootstrap histórico
-    MAX_WEIGHT    = 0.5     # MEJORA 8: límite máximo por activo (evita concentraciones irreales)
-
     # =====================================================================
     # 1.5) DESCARGA Y DEPURACIÓN DE DATOS (SIN LOOK-AHEAD BIAS)
     # =====================================================================
@@ -234,25 +203,15 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         raise ValueError("No hay datos suficientes para el periodo seleccionado.")
 
     # =====================================================================
-    # 2) RETORNOS LOGARÍTMICOS Y MATRICES
-    # MEJORA 4: retornos logarítmicos — aditivos en el tiempo, simétricos.
-    # La acumulación correcta es np.exp(cumsum()), NO (1+r).cumprod().
+    # 2) RETORNOS Y MATRICES
     # =====================================================================
-    returns            = np.log(data / data.shift(1)).dropna()
+    returns            = data.pct_change().dropna()
     mean_returns_daily = returns.mean()
+    cov_daily          = returns.cov()
 
     trading_days        = 252
     mean_returns_annual = mean_returns_daily * trading_days
-
-    # MEJORA 1: Ledoit-Wolf Shrinkage (MANTENER — pilar de estabilidad)
-    lw = LedoitWolf()
-    lw.fit(returns)
-    cov_daily  = pd.DataFrame(
-        lw.covariance_,
-        index=returns.columns,
-        columns=returns.columns
-    )
-    cov_annual = cov_daily * trading_days
+    cov_annual          = cov_daily          * trading_days
 
     # =====================================================================
     # 3) FUNCIONES DE OPTIMIZACIÓN
@@ -263,30 +222,24 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         sharpe = (ret - RISK_FREE_RATE) / vol if vol > 0 else 0
         return ret, vol, sharpe
 
-    # CORRECCIÓN 1: neg_sharpe con regularización L2 — simétrico con MinVol
-    # Antes la penalización L2 solo se aplicaba en volatilidad, lo que
-    # generaba una asimetría matemática entre las dos optimizaciones.
+    # CORRECCIÓN 2 — neg_sharpe: la condición de guarda verifica vol > 0,
+    # no sharpe != 0. Si el Sharpe es 0 de forma legítima (retorno = rf),
+    # la condición anterior devolvía 1e6 y rompía la optimización.
     def neg_sharpe(weights):
-        ret_val, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
-        penalty = LAMBDA_REG * np.sum(weights ** 2)
-        return -(sharpe - penalty) if vol_val > 0 else 1e6
+        _, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
+        return -sharpe if vol_val > 0 else 1e6
 
-    # MEJORA 2: Regularización L2 en volatilidad
-    def vol_obj(weights):
-        variance = weights.T @ cov_annual @ weights
-        penalty  = LAMBDA_REG * np.sum(weights ** 2)
-        return np.sqrt(variance) + penalty
+    def vol(weights):
+        return np.sqrt(weights.T @ cov_annual @ weights)
 
     def max_drawdown(series):
         cumulative_max = series.cummax()
         drawdown       = (series / cumulative_max) - 1
         return drawdown.min()
 
-    n      = len(tickers)
-    x0     = np.repeat(1 / n, n)
-
-    # MEJORA 8: límite máximo por activo = 50% — evita concentraciones irreales
-    bounds      = tuple((0, MAX_WEIGHT) for _ in range(n))
+    n           = len(tickers)
+    x0          = np.repeat(1 / n, n)
+    bounds      = tuple((0, 1) for _ in range(n))
     constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
 
     # =====================================================================
@@ -299,7 +252,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         weights_sharpe, mean_returns_annual, cov_annual
     )
 
-    res_minvol     = minimize(vol_obj, x0, method="SLSQP",
+    res_minvol     = minimize(vol, x0, method="SLSQP",
                               bounds=bounds, constraints=constraints)
     weights_minvol = res_minvol.x
     ret_minvol, vol_minvol, sharpe_minvol = performance(
@@ -312,18 +265,17 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     )
 
     # =====================================================================
-    # 5) RENDIMIENTOS ACUMULADOS
-    # CORRECCIÓN 2: Con log returns, acumulación = np.exp(cumsum())
+    # 5) RENDIMIENTOS DE CADA ESTRATEGIA
     # =====================================================================
-    cumulative_assets = np.exp(returns.cumsum())
+    cumulative_assets = (1 + returns).cumprod()
 
     daily_sharpe = returns.dot(weights_sharpe)
     daily_minvol = returns.dot(weights_minvol)
     daily_equal  = returns.dot(weights_equal)
 
-    cum_sharpe = np.exp(daily_sharpe.cumsum())
-    cum_minvol = np.exp(daily_minvol.cumsum())
-    cum_equal  = np.exp(daily_equal.cumsum())
+    cum_sharpe = (1 + daily_sharpe).cumprod()
+    cum_minvol = (1 + daily_minvol).cumprod()
+    cum_equal  = (1 + daily_equal).cumprod()
 
     dd_sharpe = max_drawdown(cum_sharpe)
     dd_minvol = max_drawdown(cum_minvol)
@@ -332,10 +284,8 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # =====================================================================
     # 5.1) BENCHMARKS DE MERCADO
     # =====================================================================
-    benchmark_log_returns = np.log(
-        benchmark_data / benchmark_data.shift(1)
-    ).dropna()
-    benchmark_cum = np.exp(benchmark_log_returns.cumsum())
+    benchmark_returns = benchmark_data.pct_change().dropna()
+    benchmark_cum     = (1 + benchmark_returns).cumprod()
 
     # =====================================================================
     # 6) FRONTERA EFICIENTE
@@ -353,12 +303,12 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
             {"type": "eq",
              "fun": lambda w, targ=targ: np.dot(w, mean_returns_annual) - targ}
         )
-        res = minimize(vol_obj, x0, method="SLSQP",
+        res = minimize(vol, x0, method="SLSQP",
                        bounds=bounds, constraints=cons)
         if res.success:
-            r_val, v_val, _ = performance(res.x, mean_returns_annual, cov_annual)
-            efficient_rets.append(r_val)
-            efficient_vols.append(v_val)
+            r, v, _ = performance(res.x, mean_returns_annual, cov_annual)
+            efficient_rets.append(r)
+            efficient_vols.append(v)
 
     # =====================================================================
     # 8) COMPARACIÓN SISTEMÁTICA DE ESTRATEGIAS
@@ -399,6 +349,10 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 8.3) SORTINO RATIO
+    # CORRECCIÓN 1 — downside_dev usa RMS (raíz cuadrática media) sobre
+    # los retornos negativos del portafolio, no std() con ceros artificiales.
+    # std() calcula dispersión alrededor de la media de la serie mezclada,
+    # no alrededor de cero que es lo matemáticamente correcto para Sortino.
     # =====================================================================
     def sortino_ratio(ret_anual, daily_portfolio_returns):
         downside     = np.minimum(daily_portfolio_returns, 0)
@@ -415,71 +369,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     })
 
     # =====================================================================
-    # 8.3.5a) SIMULACIÓN MONTE CARLO MULTIVARIADA — MEJORA 3 + 6
-    # MEJORA 4 confirmada: simulación multivariada correcta con
-    # np.random.multivariate_normal — NO activos por separado.
-    # 15,000 trayectorias para reducir ruido estadístico (MEJORA 6).
-    # =====================================================================
-    np.random.seed(42)
-    sim_assets = np.random.multivariate_normal(
-        mean_returns_annual.values,
-        cov_annual.values,
-        N_SIMULATIONS
-    )
-
-    sim_sharpe = sim_assets @ weights_sharpe
-    sim_minvol = sim_assets @ weights_minvol
-    sim_equal  = sim_assets @ weights_equal
-
-    def var_cvar(simulated, alpha=0.05):
-        var          = np.percentile(simulated, alpha * 100)
-        cvar         = simulated[simulated <= var].mean()
-        prob_perdida = (simulated < 0).mean()
-        return var, cvar, prob_perdida
-
-    var_s, cvar_s, prob_s = var_cvar(sim_sharpe)
-    var_m, cvar_m, prob_m = var_cvar(sim_minvol)
-    var_e, cvar_e, prob_e = var_cvar(sim_equal)
-
-    df_mc_stats = pd.DataFrame({
-        "Estrategia":    ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
-        "VaR 95%":       [var_s, var_m, var_e],
-        "CVaR 95%":      [cvar_s, cvar_m, cvar_e],
-        "Prob. Pérdida": [prob_s, prob_m, prob_e]
-    })
-
-    # =====================================================================
-    # 8.3.5b) BOOTSTRAP HISTÓRICO — MEJORA 5
-    # Remuestreo con reemplazo de retornos reales diarios.
-    # No asume distribución normal: captura asimetría y colas pesadas.
-    # Complementa Monte Carlo para mayor credibilidad técnica.
-    # =====================================================================
-    np.random.seed(42)
-    returns_array = returns.values  # shape: (T, n_assets)
-
-    # Remuestrear filas (días) con reemplazo
-    boot_indices = np.random.randint(0, len(returns_array), size=(N_BOOTSTRAP, trading_days))
-    boot_samples = returns_array[boot_indices]  # shape: (N_BOOTSTRAP, 252, n_assets)
-
-    # Retorno anual de cada trayectoria = suma de log returns diarios del año
-    boot_annual = boot_samples.sum(axis=1)  # shape: (N_BOOTSTRAP, n_assets)
-
-    boot_sharpe = boot_annual @ weights_sharpe
-    boot_minvol = boot_annual @ weights_minvol
-    boot_equal  = boot_annual @ weights_equal
-
-    var_bs, cvar_bs, prob_bs = var_cvar(boot_sharpe)
-    var_bm, cvar_bm, prob_bm = var_cvar(boot_minvol)
-    var_be, cvar_be, prob_be = var_cvar(boot_equal)
-
-    df_bootstrap_stats = pd.DataFrame({
-        "Estrategia":    ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
-        "VaR 95% (Boot)":  [var_bs, var_bm, var_be],
-        "CVaR 95% (Boot)": [cvar_bs, cvar_bm, cvar_be],
-        "Prob. Pérdida (Boot)": [prob_bs, prob_bm, prob_be]
-    })
-
-    # =====================================================================
     # 8.5) TABLA BENCHMARKS
     # =====================================================================
     benchmarks = {
@@ -491,20 +380,20 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     def annualized_return(daily_returns_series):
         return daily_returns_series.mean() * 252
 
-    def annualized_vol_bm(series):
+    def annualized_vol(series):
         return series.std() * np.sqrt(252)
 
     benchmark_summary = []
     for name, ticker in benchmarks.items():
-        ret_bm = annualized_return(benchmark_log_returns[ticker])
-        v_bm   = annualized_vol_bm(benchmark_log_returns[ticker])
-        dd_bm  = max_drawdown(benchmark_cum[ticker])
+        ret = annualized_return(benchmark_returns[ticker])
+        v   = annualized_vol(benchmark_returns[ticker])
+        dd  = max_drawdown(benchmark_cum[ticker])
         benchmark_summary.append({
             "Benchmark":         name,
-            "Retorno Anual":     ret_bm,
-            "Volatilidad":       v_bm,
+            "Retorno Anual":     ret,
+            "Volatilidad":       v,
             "Retorno Acumulado": benchmark_cum[ticker].iloc[-1] - 1,
-            "Máx Drawdown":      dd_bm
+            "Máx Drawdown":      dd
         })
     df_benchmarks = pd.DataFrame(benchmark_summary)
 
@@ -519,42 +408,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "Nasdaq 100 (QQQ)":   benchmark_cum["QQQ"],
         "MSCI World (URTH)":  benchmark_cum["URTH"]
     })
-
-    # =====================================================================
-    # 9) MEJORA 9: ANÁLISIS DE ROBUSTEZ TEMPORAL
-    # Optimización en sub-periodos (3, 5 y N años completos).
-    # Muestra cuánto cambian los pesos — señal de estabilidad del modelo.
-    # =====================================================================
-    robustez_rows = []
-    periodos_disponibles = []
-    for p_years in [3, 5, years]:
-        p_start = end_date.replace(year=end_date.year - p_years)
-        if p_start >= data.index[0].to_pydatetime().replace(tzinfo=None):
-            p_ret = returns[returns.index >= pd.Timestamp(p_start)]
-            if len(p_ret) < 60:
-                continue
-            p_mean = p_ret.mean() * trading_days
-            lw_p   = LedoitWolf()
-            lw_p.fit(p_ret)
-            p_cov  = pd.DataFrame(lw_p.covariance_, index=p_ret.columns, columns=p_ret.columns) * trading_days
-
-            def neg_sharpe_p(w):
-                r_p = np.dot(w, p_mean)
-                v_p = np.sqrt(w.T @ p_cov.values @ w)
-                sh  = (r_p - RISK_FREE_RATE) / v_p if v_p > 0 else 0
-                pen = LAMBDA_REG * np.sum(w ** 2)
-                return -(sh - pen)
-
-            res_p = minimize(neg_sharpe_p, x0, method="SLSQP",
-                             bounds=bounds, constraints=constraints)
-            if res_p.success:
-                row = {"Periodo": f"{p_years} años"}
-                for t, w in zip(tickers, res_p.x):
-                    row[t] = round(w, 4)
-                robustez_rows.append(row)
-                periodos_disponibles.append(p_years)
-
-    df_robustez = pd.DataFrame(robustez_rows) if robustez_rows else pd.DataFrame()
 
     # =====================================================================
     # 9) SÍNTESIS ANALÍTICA PARA EL ASISTENTE
@@ -597,7 +450,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     weights_series = years_index.map(year_weights)
 
     weighted_performance = (
-        np.exp(df_strategies.cumsum())
+        (1 + df_strategies).cumprod()
         .mul(weights_series, axis=0)
         .iloc[-1]
     )
@@ -635,19 +488,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "rolling_vol":        rolling_vol,
         "df_calmar":          df_calmar,
         "df_sortino":         df_sortino,
-        "df_mc_stats":        df_mc_stats,
-        "df_bootstrap_stats": df_bootstrap_stats,
-        "df_robustez":        df_robustez,
-        "mc_simulations": {
-            "Sharpe Máximo":      sim_sharpe,
-            "Mínima Volatilidad": sim_minvol,
-            "Pesos Iguales":      sim_equal
-        },
-        "bootstrap_simulations": {
-            "Sharpe Máximo":      boot_sharpe,
-            "Mínima Volatilidad": boot_minvol,
-            "Pesos Iguales":      boot_equal
-        },
         "df_benchmarks":      df_benchmarks,
         "comparison_cum":     comparison_cum,
         "weighted_performance": weighted_performance,
@@ -925,109 +765,6 @@ if st.session_state.analysis_done:
         )
 
     # =====================================================================
-    # 8.3.5) MONTE CARLO + BOOTSTRAP — panel lado a lado
-    # =====================================================================
-    st.subheader("Análisis de Riesgo Forward-Looking: Monte Carlo vs Bootstrap Histórico")
-
-    # Tablas de métricas
-    _t1, _t2 = st.columns(2)
-    with _t1:
-        st.caption("📊 Monte Carlo (distribución normal multivariada)")
-        st.dataframe(r["df_mc_stats"], use_container_width=True)
-    with _t2:
-        st.caption("📊 Bootstrap Histórico (retornos reales sin supuesto de normalidad)")
-        st.dataframe(r["df_bootstrap_stats"], use_container_width=True)
-
-    # ── Gráfica combinada lado a lado ────────────────────────────────────
-    def _kde_panel(ax, simulations_dict, title, subtitle):
-        palette = [_CYAN, _GREEN, _PURPLE]
-        for (name, sims), col in zip(simulations_dict.items(), palette):
-            kde = gaussian_kde(sims, bw_method=0.18)
-            xs  = np.linspace(
-                min(sims.min(), -0.5),
-                max(sims.max(),  0.7),
-                500
-            )
-            ys = kde(xs)
-            ax.fill_between(xs, ys, alpha=0.18, color=col)
-            ax.plot(xs, ys, color=col, linewidth=2.2, label=name)
-            var95   = np.percentile(sims, 5)
-            xs_tail = xs[xs <= var95]
-            ax.fill_between(xs_tail, kde(xs_tail), alpha=0.50, color=col)
-            ax.axvline(var95, color=col, linewidth=1.0, linestyle=":")
-
-        ax.axvline(0, color="white", linewidth=1.8,
-                   linestyle="--", alpha=0.55, label="Retorno = 0%")
-
-        ylim = ax.get_ylim()
-        ax.text(ax.get_xlim()[0] + 0.02, ylim[1] * 0.88,
-                "◀ Área sombreada\n   = Cola VaR 95%",
-                color=_DIM, fontsize=7.5, style="italic")
-
-        ax.xaxis.set_major_formatter(_PCT)
-        ax.set_xlabel("Retorno anual simulado", fontsize=9)
-        ax.set_ylabel("Densidad de probabilidad", fontsize=9)
-        ax.set_title(title, fontsize=11, fontweight="bold", color=_CYAN, pad=10)
-        ax.text(0.5, 1.01, subtitle, transform=ax.transAxes,
-                ha="center", va="bottom", fontsize=7.5, color=_DIM)
-        ax.legend(facecolor=_BG_CARD, edgecolor=_GRID,
-                  labelcolor=_TEXT, fontsize=8)
-
-    fig_dual, (ax_mc, ax_bt) = plt.subplots(
-        1, 2, figsize=(13, 4.5), facecolor=_BG_DARK
-    )
-    _dark_ax(ax_mc)
-    _dark_ax(ax_bt)
-
-    _kde_panel(ax_mc, r["mc_simulations"],
-               "Monte Carlo",
-               "15,000 simulaciones · Asume distribución normal multivariada")
-    _kde_panel(ax_bt, r["bootstrap_simulations"],
-               "Bootstrap Histórico",
-               "15,000 muestras · Usa retornos reales · Sin supuesto de normalidad")
-
-    fig_dual.suptitle(
-        "Distribución de Retornos Anuales Simulados por Estrategia",
-        fontsize=12, fontweight="bold", color=_TEXT, y=1.02
-    )
-    fig_dual.tight_layout()
-    st.pyplot(fig_dual)
-    plt.close(fig_dual)
-
-    with st.expander("📖 Interpretación – Monte Carlo vs Bootstrap Histórico"):
-        st.markdown(
-        """
-        **¿Qué muestra esta gráfica?**
-
-        Cada curva representa la distribución de posibles retornos anuales de una estrategia,
-        estimada con dos métodos distintos que se muestran lado a lado para facilitar la comparación.
-
-        **Panel izquierdo – Monte Carlo:**
-        Genera 15,000 escenarios asumiendo que los retornos siguen una distribución normal
-        multivariada. Es el método estándar en finanzas cuantitativas.
-
-        **Panel derecho – Bootstrap Histórico:**
-        Remuestrea directamente los retornos diarios reales, sin imponer ningún supuesto
-        de distribución. Captura mejor los eventos extremos (crisis, crashes) y las colas
-        pesadas que la distribución normal subestima.
-
-        **Cómo leer las curvas:**
-        - Curvas desplazadas a la **derecha** → mayor retorno esperado.
-        - Curvas más **estrechas** → menor volatilidad, resultados más predecibles.
-        - El **área sombreada** en cada curva representa la cola del VaR 95%: los peores escenarios
-          (5% de probabilidad). Cuanto mayor sea esta zona a la izquierda del cero, mayor el riesgo extremo.
-        - La **línea punteada vertical** marca el retorno = 0%. Todo lo que queda a su izquierda
-          representa pérdida para el inversor.
-
-        **Lectura comparativa entre paneles:**
-        - Si ambos métodos muestran distribuciones similares → la distribución normal
-          es una buena aproximación para ese portafolio.
-        - Si el Bootstrap muestra colas más pesadas o mayor asimetría → los retornos históricos
-          tienen comportamientos extremos que Monte Carlo no captura bien.
-        """
-        )
-
-    # =====================================================================
     # 8.4) PERIODOS DE CRISIS (COVID 2020)
     # =====================================================================
     st.subheader("Comportamiento en periodo de crisis (COVID 2020)")
@@ -1148,38 +885,6 @@ if st.session_state.analysis_done:
         """)
 
     # =====================================================================
-    # 8.7) ANÁLISIS DE ROBUSTEZ TEMPORAL — MEJORA 9
-    # =====================================================================
-    if not r["df_robustez"].empty:
-        st.subheader("Robustez temporal – Estabilidad de pesos por sub-periodo")
-        st.dataframe(r["df_robustez"])
-
-        with st.expander("📖 Interpretación – Análisis de robustez temporal"):
-            st.markdown("""
-            **Interpretación del análisis de robustez temporal:**
-
-            Esta tabla muestra cómo cambian los pesos óptimos del portafolio de Sharpe Máximo
-            cuando se optimiza sobre diferentes sub-periodos históricos (3, 5 y N años).
-
-            **¿Por qué es importante?**
-
-            - Si los pesos son **similares entre periodos**, el modelo es **estable y robusto**:
-              la señal de optimización es consistente independientemente del horizonte temporal.
-            - Si los pesos **cambian drásticamente**, indica que el modelo es sensible
-              a qué datos se incluyen, lo cual es una limitación importante que el inversor
-              debe considerar.
-
-            **Cómo leer la tabla:**
-            - Cada fila representa una optimización independiente sobre ese sub-periodo.
-            - Columnas son los tickers analizados.
-            - Compare los valores fila a fila: variaciones menores a 10–15 puntos porcentuales
-              sugieren estabilidad razonable; variaciones mayores indican fragilidad del modelo.
-
-            Este análisis es uno de los más valorados en evaluaciones técnicas avanzadas,
-            ya que demuestra si la optimización tiene validez fuera del periodo de entrenamiento.
-            """)
-
-    # =====================================================================
     # 9) SÍNTESIS — INTERPRETACIÓN FINAL PONDERADA EN EL TIEMPO
     # =====================================================================
     st.subheader("Interpretación automática del mejor portafolio")
@@ -1220,60 +925,11 @@ if st.session_state.analysis_done:
 
     _cw1, _cw2, _cw3 = st.columns([0.5, 2, 0.5])
     with _cw2:
-        _n = len(df_weights)
-        _bar_colors = [_CYAN, _GREEN, _PURPLE, _ORANGE,
-                       "#ff6b9d", "#ffd166"][:_n]
-        _eq_w = 1 / _n
-
-        fig_w, ax_w = plt.subplots(figsize=(7, max(3, _n * 0.9)),
-                                    facecolor=_BG_DARK)
-        _dark_ax(ax_w)
-
-        bars = ax_w.barh(
-            df_weights["Ticker"], df_weights["Peso"],
-            color=_bar_colors, height=0.55,
-            edgecolor=_BG_DARK, linewidth=0.8
-        )
-
-        # Etiquetas dentro/fuera de barra según ancho
-        for bar, w in zip(bars, df_weights["Peso"]):
-            if w > 0.10:
-                ax_w.text(
-                    bar.get_width() - 0.015,
-                    bar.get_y() + bar.get_height() / 2,
-                    f"{w:.1%}", va="center", ha="right",
-                    color="white", fontsize=11, fontweight="bold"
-                )
-            else:
-                ax_w.text(
-                    bar.get_width() + 0.008,
-                    bar.get_y() + bar.get_height() / 2,
-                    f"{w:.1%}", va="center", ha="left",
-                    color=_TEXT, fontsize=11, fontweight="bold"
-                )
-
-        # Línea de referencia: peso equitativo
-        ax_w.axvline(_eq_w, color=_ORANGE, linewidth=1.4,
-                     linestyle="--", alpha=0.85)
-        ax_w.text(_eq_w + 0.005, _n - 0.65,
-                  f"Peso igual ({_eq_w:.0%})",
-                  color=_ORANGE, fontsize=8)
-
-        ax_w.xaxis.set_major_formatter(_PCT)
-        ax_w.set_xlabel("Proporción del capital asignada", fontsize=10)
-        ax_w.set_title(
-            f"Composición del Portafolio Recomendado",
-            fontsize=11, fontweight="bold", color=_CYAN, pad=10
-        )
-        ax_w.text(0.5, 1.01, f"{metodo} · Límite máx. 50% por activo",
-                  transform=ax_w.transAxes, ha="center",
-                  va="bottom", fontsize=8, color=_DIM)
-        ax_w.set_xlim(0, min(1.0, df_weights["Peso"].max() + 0.18))
-        ax_w.invert_yaxis()
-
-        fig_w.tight_layout()
-        st.pyplot(fig_w)
-        plt.close(fig_w)
+        fig, ax = plt.subplots(figsize=(6, 3.5))
+        ax.barh(df_weights["Ticker"], df_weights["Peso"])
+        ax.set_title(f"Composición del portafolio recomendado\n({metodo})")
+        st.pyplot(fig)
+        plt.close(fig)
 
     with st.expander("📖 Interpretación – Pesos óptimos del portafolio recomendado"):
         st.markdown(
@@ -1287,8 +943,6 @@ if st.session_state.analysis_done:
             - La suma total de los pesos es del **100%**.
             - Esta asignación refleja el comportamiento histórico del portafolio
               bajo el criterio seleccionado.
-            - Ningún activo puede superar el **50% del portafolio** (límite técnico
-              para evitar concentraciones excesivas poco realistas).
 
             ### Explicación extendida de los pesos óptimos
 
@@ -1350,7 +1004,7 @@ if st.session_state.analysis_done:
             """
             **Interpretación:**
 
-            Este gráfico muestra los retornos logarítmicos diarios de cada activo,
+            Este gráfico muestra los retornos porcentuales diarios de cada activo,
             evidenciando la volatilidad de corto plazo.
 
             - Picos positivos o negativos representan movimientos abruptos del mercado.
@@ -1392,72 +1046,30 @@ if st.session_state.analysis_done:
 
     _col1, _col2, _col3 = st.columns([0.5, 2, 0.5])
     with _col2:
-        fig2, ax2 = plt.subplots(figsize=(8, 5), facecolor=_BG_DARK)
-        _dark_ax(ax2)
+        fig2, ax2 = plt.subplots(figsize=(6, 4))
 
-        ev = np.array(r["efficient_vols"])
-        er = np.array(r["efficient_rets"])
-
-        # Zona sombreada = región factible (ineficiente)
-        ax2.fill_between(ev, er, alpha=0.09, color=_CYAN)
-        ax2.fill_between(ev, er.min() * 0.5, er, alpha=0.05, color=_CYAN)
-
-        # Curva de la frontera
-        ax2.plot(ev, er, color=_CYAN, linewidth=3,
-                 zorder=4, label="Frontera eficiente")
-
-        # Línea vertical en mínima varianza
-        ax2.axvline(r["vol_minvol"], color=_DIM, linewidth=0.8,
-                    linestyle=":", alpha=0.6)
-
-        # Etiqueta de zona ineficiente
-        mid_vol = (ev.min() + ev.max()) / 2
-        ax2.text(mid_vol, er.min() * 0.7,
-                 "Zona ineficiente\n(mismo riesgo, menos retorno)",
-                 color=_DIM, fontsize=8, ha="center", style="italic",
-                 bbox=dict(boxstyle="round,pad=0.4",
-                           fc=_BG_CARD, ec=_GRID, alpha=0.75))
-
-        # Puntos y anotaciones numeradas
-        _pts = [
-            (r["vol_sharpe"], r["ret_sharpe"], "① Sharpe Máximo",    _CYAN,   "o", (14,  6)),
-            (r["vol_minvol"], r["ret_minvol"], "② Mín. Volatilidad", _GREEN,  "^", (10, -26)),
-            (r["vol_equal"],  r["ret_equal"],  "③ Pesos Iguales",    _PURPLE, "s", (14,  6)),
-        ]
-        for vx, ry, label, col, mk, off in _pts:
-            ax2.scatter(vx, ry, color=col, s=160, marker=mk,
-                        edgecolors="white", linewidths=1.2, zorder=6)
-            ax2.annotate(
-                f"{label}\nRetorno: {ry:.1%}  ·  Riesgo: {vx:.1%}",
-                xy=(vx, ry), xytext=off, textcoords="offset points",
-                fontsize=8.5, color=col, fontweight="bold",
-                bbox=dict(boxstyle="round,pad=0.4",
-                          fc=_BG_CARD, ec=col, alpha=0.92),
-                arrowprops=dict(arrowstyle="-", color=col, lw=0.8)
-            )
-
-        ax2.xaxis.set_major_formatter(_PCT)
-        ax2.yaxis.set_major_formatter(_PCT)
-        ax2.set_xlabel("Volatilidad anual  (↑ más riesgo)", fontsize=10)
-        ax2.set_ylabel("Retorno anual esperado  (↑ mejor)", fontsize=10)
-        ax2.set_title("Frontera Eficiente de Markowitz",
-                      fontsize=13, fontweight="bold", color=_CYAN, pad=14)
-
-        _handles = [
-            plt.Line2D([0], [0], color=_CYAN,   linewidth=2.5,
-                       label="Frontera eficiente"),
-            plt.Line2D([0], [0], color=_CYAN,   marker="o",
-                       linestyle="None", markersize=8, label="① Sharpe Máximo"),
-            plt.Line2D([0], [0], color=_GREEN,  marker="^",
-                       linestyle="None", markersize=8, label="② Mín. Volatilidad"),
-            plt.Line2D([0], [0], color=_PURPLE, marker="s",
-                       linestyle="None", markersize=8, label="③ Pesos Iguales"),
-        ]
-        ax2.legend(handles=_handles, facecolor=_BG_CARD,
-                   edgecolor=_GRID, labelcolor=_TEXT,
-                   fontsize=8.5, loc="lower right")
-
-        fig2.tight_layout()
+        ax2.plot(r["efficient_vols"], r["efficient_rets"],
+                 linestyle="-", linewidth=2, label="Frontera eficiente")
+        ax2.scatter(r["vol_sharpe"], r["ret_sharpe"],
+                    s=90, marker="o", label="Sharpe Máximo")
+        ax2.scatter(r["vol_minvol"], r["ret_minvol"],
+                    s=90, marker="^", label="Mínima Volatilidad")
+        ax2.scatter(r["vol_equal"],  r["ret_equal"],
+                    s=90, marker="s", label="Pesos Iguales")
+        ax2.annotate("Sharpe Máximo",
+                     (r["vol_sharpe"], r["ret_sharpe"]),
+                     xytext=(8, 8), textcoords="offset points", fontweight="bold")
+        ax2.annotate("Mínima Volatilidad",
+                     (r["vol_minvol"], r["ret_minvol"]),
+                     xytext=(8, -12), textcoords="offset points", fontweight="bold")
+        ax2.annotate("Pesos Iguales",
+                     (r["vol_equal"], r["ret_equal"]),
+                     xytext=(8, 8), textcoords="offset points", fontweight="bold")
+        ax2.set_xlabel("Volatilidad anual (riesgo)")
+        ax2.set_ylabel("Retorno anual esperado")
+        ax2.set_title("Frontera eficiente y estrategias comparadas")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
         st.pyplot(fig2)
         plt.close(fig2)
 
@@ -1643,6 +1255,7 @@ INSTRUCCIONES ESTRICTAS:
 
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
