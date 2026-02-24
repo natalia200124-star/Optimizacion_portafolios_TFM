@@ -676,7 +676,7 @@ if st.session_state.analysis_done:
         """)
 
     # =====================================================================
-    # MONTE CARLO — GRÁFICO PREMIUM REDISEÑADO
+    # MONTE CARLO — GRÁFICO CORREGIDO (4 fixes aplicados)
     # =====================================================================
     st.subheader("Simulación Monte Carlo – Análisis de riesgo forward-looking")
     st.dataframe(r["df_mc_stats"])
@@ -686,7 +686,8 @@ if st.session_state.analysis_done:
         strat_colors = [COLORS["sharpe"], COLORS["minvol"], COLORS["equal"]]
         strat_names  = ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"]
 
-        fig_mc, axes = plt.subplots(1, 2, figsize=(14, 5))
+        # FIX 3: figsize altura aumentada de 5 a 6
+        fig_mc, axes = plt.subplots(1, 2, figsize=(14, 6))
         apply_dark_style(fig_mc, axes)
         fig_mc.suptitle("Distribución de Retornos Anuales Simulados (5,000 escenarios)",
                          color=COLORS["sharpe"], fontsize=12, fontweight="bold", y=1.01)
@@ -699,8 +700,10 @@ if st.session_state.analysis_done:
 
             for name, color in zip(strat_names, strat_colors):
                 sims = sims_dict[name]
-                ax.hist(sims, bins=70, alpha=0.45, label=name, color=color, density=True,
-                        edgecolor="none")
+                # FIX 4: bins=60, range recortado a percentil 0.5–99.5 para eliminar outliers
+                ax.hist(sims, bins=60, alpha=0.5, label=name, color=color, density=True,
+                        edgecolor="none", linewidth=0,
+                        range=(np.percentile(sims, 0.5), np.percentile(sims, 99.5)))
                 # Línea VaR punteada
                 var_val = var_dict[name]
                 ax.axvline(var_val, color=color, linestyle="--", linewidth=1.4, alpha=0.9,
@@ -708,18 +711,25 @@ if st.session_state.analysis_done:
 
             # Línea del cero
             ax.axvline(0, color="white", linestyle="-", linewidth=1.8, alpha=0.4)
-            ax.text(0.002, ax.get_ylim()[1] * 0.95 if ax.get_ylim()[1] > 0 else 1,
-                    "0%", color="white", fontsize=7, alpha=0.6,
-                    transform=ax.get_xaxis_transform())
+            # FIX 1: etiqueta "0%" usando transform correcto, sin get_ylim() prematuro
+            ax.text(0, 1.0, "0%", color="white", fontsize=7, alpha=0.6,
+                    transform=ax.get_xaxis_transform(),
+                    ha="center", va="bottom")
 
             ax.set_title(title, fontsize=10, fontweight="bold", pad=8)
             ax.set_xlabel("Retorno anual simulado", fontsize=9)
             ax.set_ylabel("Densidad de probabilidad", fontsize=9)
             ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
 
-            legend = ax.legend(fontsize=7, facecolor="#252d3f", edgecolor=COLORS["border"],
-                               labelcolor=COLORS["text"], loc="upper left", ncol=2,
-                               framealpha=0.8)
+            # FIX 2: leyenda con ncol=1 y bbox_to_anchor para no tapar los histogramas
+            legend = ax.legend(fontsize=6.5, facecolor="#252d3f", edgecolor=COLORS["border"],
+                               labelcolor=COLORS["text"], loc="upper left", ncol=1,
+                               framealpha=0.9, bbox_to_anchor=(0.01, 0.99))
+
+        # FIX 3 (continuación): forzar eje Y desde 0 después de graficar
+        for ax in axes:
+            ax.set_ylim(bottom=0)
+            ax.autoscale(axis='y')
 
         plt.tight_layout()
         st.pyplot(fig_mc)
@@ -1129,6 +1139,7 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
