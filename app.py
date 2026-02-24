@@ -4,46 +4,15 @@ import yfinance as yf
 import numpy as np
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from matplotlib.patches import FancyBboxPatch
-import matplotlib.patheffects as pe
 from datetime import datetime
 import requests
 import os
-from sklearn.covariance import LedoitWolf
+from sklearn.covariance import LedoitWolf  # MEJORA 1: covarianza robusta
 
 # =========================
 # RISK_FREE_RATE fuera de la función cacheada
 # =========================
 RISK_FREE_RATE = 0.045  # T-Bill 3 meses ~4.5%
-
-# =========================
-# PALETA DE COLORES COMPARTIDA
-# =========================
-COLORS = {
-    "sharpe":  "#00d9ff",   # cian
-    "minvol":  "#66ffb2",   # verde menta
-    "equal":   "#ff9966",   # naranja suave
-    "bg":      "#0f1419",
-    "panel":   "#1a1f2e",
-    "border":  "#00d9ff30",
-    "text":    "#e1e7ed",
-    "grid":    "#ffffff18",
-}
-
-def apply_dark_style(fig, axes_list):
-    """Aplica tema oscuro coherente a cualquier figura matplotlib."""
-    fig.patch.set_facecolor(COLORS["bg"])
-    for ax in (axes_list if hasattr(axes_list, '__iter__') else [axes_list]):
-        ax.set_facecolor(COLORS["panel"])
-        ax.tick_params(colors=COLORS["text"], labelsize=8)
-        ax.xaxis.label.set_color(COLORS["text"])
-        ax.yaxis.label.set_color(COLORS["text"])
-        ax.title.set_color(COLORS["sharpe"])
-        for spine in ax.spines.values():
-            spine.set_edgecolor(COLORS["border"])
-        ax.grid(True, color=COLORS["grid"], linewidth=0.6)
-
 
 # =========================
 # DISEÑO PROFESIONAL
@@ -173,12 +142,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================
-# SESSION STATE
+# SESSION STATE - INICIALIZACIÓN
 # =========================
 if "analysis_done" not in st.session_state:
     st.session_state.analysis_done = False
+
 if "analysis_results" not in st.session_state:
     st.session_state.analysis_results = None
+
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []
 
@@ -187,17 +158,13 @@ if "chat_messages" not in st.session_state:
 def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     tickers = list(tickers_tuple)
-    n = len(tickers)
 
-    # ── Parámetros ────────────────────────────────────────────────────────
-    LAMBDA_REG    = 0.01
-    N_SIMULATIONS = 5000   # 5,000 es el estándar académico para VaR/CVaR 95%
-    # MAX_WEIGHT dinámico: permite hasta 2× el peso igual, mín 40%, máx 80%
-    # Esto evita el bug de forzar 50/50 con solo 2 activos
-    MAX_WEIGHT    = min(0.80, max(2.0 / n, 0.40))
+    # Parámetros de las mejoras
+    LAMBDA_REG    = 0.01   # MEJORA 2: fuerza de regularización L2
+    N_SIMULATIONS = 5000   # MEJORA 3: trayectorias Monte Carlo
 
     # =====================================================================
-    # 1) DESCARGA DE DATOS
+    # 1.5) DESCARGA Y DEPURACIÓN DE DATOS (SIN LOOK-AHEAD BIAS)
     # =====================================================================
     end_date   = datetime.today()
     start_date = end_date.replace(year=end_date.year - years)
@@ -206,13 +173,20 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     all_tickers = tickers + benchmark_tickers
 
     raw_data = yf.download(
-        all_tickers, start=start_date, end=end_date,
-        auto_adjust=False, progress=False
+        all_tickers,
+        start=start_date,
+        end=end_date,
+        auto_adjust=False,
+        progress=False
     )
+
     raw_data = raw_data["Adj Close"]
+
     if isinstance(raw_data.columns, pd.MultiIndex):
         raw_data = raw_data.droplevel(0, axis=1)
-    raw_data = raw_data.sort_index().ffill()
+
+    raw_data = raw_data.sort_index()
+    raw_data = raw_data.ffill()
 
     data           = raw_data[tickers].copy()
     benchmark_data = raw_data[benchmark_tickers].copy()
@@ -220,29 +194,37 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     tickers_invalidos = [t for t in tickers if data[t].isnull().mean() > 0.2]
     if tickers_invalidos:
         raise ValueError(
-            f"Tickers sin datos suficientes: {', '.join(tickers_invalidos)}."
+            f"Los siguientes tickers no tienen datos suficientes para el "
+            f"periodo seleccionado: {', '.join(tickers_invalidos)}. "
+            f"Elimínalos e intente de nuevo."
         )
 
     data           = data.dropna()
     benchmark_data = benchmark_data.ffill().dropna()
+
     if data.empty:
         raise ValueError("No hay datos suficientes para el periodo seleccionado.")
 
     # =====================================================================
-    # 2) RETORNOS LOGARÍTMICOS + LEDOIT-WOLF
+    # 2) RETORNOS Y MATRICES
     # =====================================================================
     returns            = np.log(data / data.shift(1)).dropna()
     mean_returns_daily = returns.mean()
-    trading_days       = 252
+
+    trading_days        = 252
     mean_returns_annual = mean_returns_daily * trading_days
 
     lw = LedoitWolf()
     lw.fit(returns)
-    cov_daily  = pd.DataFrame(lw.covariance_, index=returns.columns, columns=returns.columns)
+    cov_daily  = pd.DataFrame(
+        lw.covariance_,
+        index=returns.columns,
+        columns=returns.columns
+    )
     cov_annual = cov_daily * trading_days
 
     # =====================================================================
-    # 3) FUNCIONES DE OPTIMIZACIÓN (regularización L2 simétrica)
+    # 3) FUNCIONES DE OPTIMIZACIÓN
     # =====================================================================
     def performance(weights, mean_ret, cov):
         ret    = np.dot(weights, mean_ret)
@@ -251,36 +233,48 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         return ret, vol, sharpe
 
     def neg_sharpe(weights):
-        ret, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
-        penalty = LAMBDA_REG * np.sum(weights ** 2)
-        return -(sharpe - penalty) if vol_val > 0 else 1e6
+        _, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
+        return -sharpe if vol_val > 0 else 1e6
 
-    def vol_obj(weights):
-        return np.sqrt(weights.T @ cov_annual @ weights) + LAMBDA_REG * np.sum(weights ** 2)
+    def vol(weights):
+        variance = weights.T @ cov_annual @ weights
+        penalty  = LAMBDA_REG * np.sum(weights ** 2)
+        return np.sqrt(variance) + penalty
 
     def max_drawdown(series):
-        return ((series / series.cummax()) - 1).min()
+        cumulative_max = series.cummax()
+        drawdown       = (series / cumulative_max) - 1
+        return drawdown.min()
 
+    n           = len(tickers)
     x0          = np.repeat(1 / n, n)
-    bounds      = tuple((0, MAX_WEIGHT) for _ in range(n))
+    bounds      = tuple((0, 1) for _ in range(n))
     constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
 
     # =====================================================================
     # 4) OPTIMIZACIONES
     # =====================================================================
-    res_sharpe     = minimize(neg_sharpe, x0, method="SLSQP", bounds=bounds, constraints=constraints)
+    res_sharpe     = minimize(neg_sharpe, x0, method="SLSQP",
+                              bounds=bounds, constraints=constraints)
     weights_sharpe = res_sharpe.x
-    ret_sharpe, vol_sharpe, sharpe_sharpe = performance(weights_sharpe, mean_returns_annual, cov_annual)
+    ret_sharpe, vol_sharpe, sharpe_sharpe = performance(
+        weights_sharpe, mean_returns_annual, cov_annual
+    )
 
-    res_minvol     = minimize(vol_obj, x0, method="SLSQP", bounds=bounds, constraints=constraints)
+    res_minvol     = minimize(vol, x0, method="SLSQP",
+                              bounds=bounds, constraints=constraints)
     weights_minvol = res_minvol.x
-    ret_minvol, vol_minvol, sharpe_minvol = performance(weights_minvol, mean_returns_annual, cov_annual)
+    ret_minvol, vol_minvol, sharpe_minvol = performance(
+        weights_minvol, mean_returns_annual, cov_annual
+    )
 
     weights_equal = np.repeat(1 / n, n)
-    ret_equal, vol_equal, sharpe_equal = performance(weights_equal, mean_returns_annual, cov_annual)
+    ret_equal, vol_equal, sharpe_equal = performance(
+        weights_equal, mean_returns_annual, cov_annual
+    )
 
     # =====================================================================
-    # 5) RENDIMIENTOS ACUMULADOS (exp cumsum — log returns)
+    # 5) RENDIMIENTOS ACUMULADOS
     # =====================================================================
     cumulative_assets = np.exp(returns.cumsum())
 
@@ -297,45 +291,50 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     dd_equal  = max_drawdown(cum_equal)
 
     # =====================================================================
-    # 5.1) BENCHMARKS
+    # 5.1) BENCHMARKS DE MERCADO
     # =====================================================================
-    benchmark_log_returns = np.log(benchmark_data / benchmark_data.shift(1)).dropna()
-    benchmark_cum         = np.exp(benchmark_log_returns.cumsum())
+    benchmark_log_returns = np.log(
+        benchmark_data / benchmark_data.shift(1)
+    ).dropna()
+    benchmark_cum = np.exp(benchmark_log_returns.cumsum())
 
     # =====================================================================
-    # 6) FRONTERA EFICIENTE + NUBE DE PORTAFOLIOS ALEATORIOS
+    # 6) FRONTERA EFICIENTE
     # =====================================================================
-    target_returns = np.linspace(mean_returns_annual.min(), mean_returns_annual.max(), 50)
+    target_returns = np.linspace(
+        mean_returns_annual.min(),
+        mean_returns_annual.max(),
+        50
+    )
+
     efficient_vols, efficient_rets = [], []
     for targ in target_returns:
         cons = (
             {"type": "eq", "fun": lambda w: np.sum(w) - 1},
-            {"type": "eq", "fun": lambda w, targ=targ: np.dot(w, mean_returns_annual) - targ}
+            {"type": "eq",
+             "fun": lambda w, targ=targ: np.dot(w, mean_returns_annual) - targ}
         )
-        res = minimize(vol_obj, x0, method="SLSQP", bounds=bounds, constraints=cons)
+        res = minimize(vol, x0, method="SLSQP",
+                       bounds=bounds, constraints=cons)
         if res.success:
             r, v, _ = performance(res.x, mean_returns_annual, cov_annual)
             efficient_rets.append(r)
             efficient_vols.append(v)
 
-    # Nube de portafolios aleatorios para visualización de la frontera
-    np.random.seed(0)
-    n_random       = 2500
-    rand_w         = np.random.dirichlet(np.ones(n), size=n_random)
-    rand_rets      = rand_w @ mean_returns_annual.values
-    rand_vols      = np.array([np.sqrt(w @ cov_annual.values @ w) for w in rand_w])
-    rand_sharpes   = (rand_rets - RISK_FREE_RATE) / rand_vols
-
     # =====================================================================
-    # 8) TABLAS DE MÉTRICAS
+    # 8) COMPARACIÓN SISTEMÁTICA DE ESTRATEGIAS
     # =====================================================================
     df_compare = pd.DataFrame({
         "Estrategia":       ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
         "Retorno Anual":    [ret_sharpe, ret_minvol, ret_equal],
         "Volatilidad":      [vol_sharpe, vol_minvol, vol_equal],
         "Sharpe":           [sharpe_sharpe, sharpe_minvol, sharpe_equal],
-        "Retorno Acumulado":[cum_sharpe.iloc[-1]-1, cum_minvol.iloc[-1]-1, cum_equal.iloc[-1]-1],
-        "Máx Drawdown":     [dd_sharpe, dd_minvol, dd_equal]
+        "Retorno Acumulado":[
+            cum_sharpe.iloc[-1] - 1,
+            cum_minvol.iloc[-1] - 1,
+            cum_equal.iloc[-1]  - 1
+        ],
+        "Máx Drawdown": [dd_sharpe, dd_minvol, dd_equal]
     })
 
     rolling_vol = pd.DataFrame({
@@ -346,12 +345,16 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     df_calmar = pd.DataFrame({
         "Estrategia": ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
-        "Calmar": [ret_sharpe/abs(dd_sharpe), ret_minvol/abs(dd_minvol), ret_equal/abs(dd_equal)]
+        "Calmar": [
+            ret_sharpe / abs(dd_sharpe),
+            ret_minvol / abs(dd_minvol),
+            ret_equal  / abs(dd_equal)
+        ]
     })
 
-    def sortino_ratio(ret_anual, daily_ret):
-        downside     = np.minimum(daily_ret, 0)
-        downside_dev = np.sqrt((downside**2).mean()) * np.sqrt(252)
+    def sortino_ratio(ret_anual, daily_portfolio_returns):
+        downside     = np.minimum(daily_portfolio_returns, 0)
+        downside_dev = np.sqrt((downside ** 2).mean()) * np.sqrt(252)
         return (ret_anual - RISK_FREE_RATE) / downside_dev if downside_dev > 0 else np.nan
 
     df_sortino = pd.DataFrame({
@@ -364,111 +367,76 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     })
 
     # =====================================================================
-    # MONTE CARLO + BOOTSTRAP
+    # 8.3.5) SIMULACIÓN MONTE CARLO
     # =====================================================================
     np.random.seed(42)
-
-    sim_assets_mc = np.random.multivariate_normal(
-        mean_returns_annual.values, cov_annual.values, N_SIMULATIONS
+    sim_assets = np.random.multivariate_normal(
+        mean_returns_annual.values,
+        cov_annual.values,
+        N_SIMULATIONS
     )
-    sim_sharpe_mc = sim_assets_mc @ weights_sharpe
-    sim_minvol_mc = sim_assets_mc @ weights_minvol
-    sim_equal_mc  = sim_assets_mc @ weights_equal
 
-    n_obs      = len(returns)
-    block_size = 20
-    n_blocks   = (N_SIMULATIONS * trading_days) // block_size + 1
-    starts     = np.random.randint(0, n_obs - block_size, size=n_blocks)
-    boot_rows  = [returns.iloc[s:s+block_size].values for s in starts]
-    boot_ret   = np.vstack(boot_rows)[:N_SIMULATIONS * trading_days]
-    boot_ret   = boot_ret.reshape(N_SIMULATIONS, trading_days, n)
+    sim_sharpe = sim_assets @ weights_sharpe
+    sim_minvol = sim_assets @ weights_minvol
+    sim_equal  = sim_assets @ weights_equal
 
-    sim_sharpe_boot = (boot_ret @ weights_sharpe).sum(axis=1)
-    sim_minvol_boot = (boot_ret @ weights_minvol).sum(axis=1)
-    sim_equal_boot  = (boot_ret @ weights_equal).sum(axis=1)
+    def var_cvar(simulated, alpha=0.05):
+        var          = np.percentile(simulated, alpha * 100)
+        cvar         = simulated[simulated <= var].mean()
+        prob_perdida = (simulated < 0).mean()
+        return var, cvar, prob_perdida
 
-    def var_cvar(s, alpha=0.05):
-        v = np.percentile(s, alpha*100)
-        c = s[s <= v].mean()
-        p = (s < 0).mean()
-        return v, c, p
-
-    vs_mc, cs_mc, ps_mc = var_cvar(sim_sharpe_mc)
-    vm_mc, cm_mc, pm_mc = var_cvar(sim_minvol_mc)
-    ve_mc, ce_mc, pe_mc = var_cvar(sim_equal_mc)
-    vs_bt, cs_bt, ps_bt = var_cvar(sim_sharpe_boot)
-    vm_bt, cm_bt, pm_bt = var_cvar(sim_minvol_boot)
-    ve_bt, ce_bt, pe_bt = var_cvar(sim_equal_boot)
+    var_s, cvar_s, prob_s = var_cvar(sim_sharpe)
+    var_m, cvar_m, prob_m = var_cvar(sim_minvol)
+    var_e, cvar_e, prob_e = var_cvar(sim_equal)
 
     df_mc_stats = pd.DataFrame({
-        "Estrategia":         ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
-        "VaR MC 95%":         [vs_mc, vm_mc, ve_mc],
-        "CVaR MC 95%":        [cs_mc, cm_mc, ce_mc],
-        "Prob. Pérdida MC":   [ps_mc, pm_mc, pe_mc],
-        "VaR Boot 95%":       [vs_bt, vm_bt, ve_bt],
-        "CVaR Boot 95%":      [cs_bt, cm_bt, ce_bt],
-        "Prob. Pérdida Boot": [ps_bt, pm_bt, pe_bt],
+        "Estrategia":    ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
+        "VaR 95%":       [var_s, var_m, var_e],
+        "CVaR 95%":      [cvar_s, cvar_m, cvar_e],
+        "Prob. Pérdida": [prob_s, prob_m, prob_e]
     })
 
     # =====================================================================
-    # BENCHMARKS
+    # 8.5) TABLA BENCHMARKS
     # =====================================================================
-    benchmarks = {"S&P 500 (SPY)": "SPY", "Nasdaq 100 (QQQ)": "QQQ", "MSCI World (URTH)": "URTH"}
+    benchmarks = {
+        "S&P 500 (SPY)":     "SPY",
+        "Nasdaq 100 (QQQ)":  "QQQ",
+        "MSCI World (URTH)": "URTH"
+    }
+
+    def annualized_return(daily_returns_series):
+        return daily_returns_series.mean() * 252
+
+    def annualized_vol(series):
+        return series.std() * np.sqrt(252)
+
     benchmark_summary = []
     for name, ticker in benchmarks.items():
-        ret = benchmark_log_returns[ticker].mean() * 252
-        v   = benchmark_log_returns[ticker].std() * np.sqrt(252)
+        ret = annualized_return(benchmark_log_returns[ticker])
+        v   = annualized_vol(benchmark_log_returns[ticker])
         dd  = max_drawdown(benchmark_cum[ticker])
         benchmark_summary.append({
-            "Benchmark": name, "Retorno Anual": ret, "Volatilidad": v,
-            "Retorno Acumulado": benchmark_cum[ticker].iloc[-1]-1, "Máx Drawdown": dd
+            "Benchmark":         name,
+            "Retorno Anual":     ret,
+            "Volatilidad":       v,
+            "Retorno Acumulado": benchmark_cum[ticker].iloc[-1] - 1,
+            "Máx Drawdown":      dd
         })
     df_benchmarks = pd.DataFrame(benchmark_summary)
 
     comparison_cum = pd.DataFrame({
-        "Sharpe Máximo": cum_sharpe, "Mínima Volatilidad": cum_minvol, "Pesos Iguales": cum_equal,
-        "S&P 500 (SPY)": benchmark_cum["SPY"], "Nasdaq 100 (QQQ)": benchmark_cum["QQQ"],
-        "MSCI World (URTH)": benchmark_cum["URTH"]
+        "Sharpe Máximo":      cum_sharpe,
+        "Mínima Volatilidad": cum_minvol,
+        "Pesos Iguales":      cum_equal,
+        "S&P 500 (SPY)":      benchmark_cum["SPY"],
+        "Nasdaq 100 (QQQ)":   benchmark_cum["QQQ"],
+        "MSCI World (URTH)":  benchmark_cum["URTH"]
     })
 
     # =====================================================================
-    # ESTABILIDAD DE PESOS
-    # =====================================================================
-    def optimizar_en_ventana(ret_v):
-        mr  = ret_v.mean() * trading_days
-        lw_ = LedoitWolf(); lw_.fit(ret_v)
-        cov_ = pd.DataFrame(lw_.covariance_ * trading_days, index=ret_v.columns, columns=ret_v.columns)
-        n_  = len(ret_v.columns)
-        x0_ = np.repeat(1/n_, n_)
-        bds = tuple((0, min(0.80, max(2.0/n_, 0.40))) for _ in range(n_))
-        con = {"type": "eq", "fun": lambda w: np.sum(w)-1}
-        def ns_(w):
-            r_ = np.dot(w, mr); v_ = np.sqrt(w.T @ cov_ @ w)
-            sh = (r_ - RISK_FREE_RATE)/v_ if v_ > 0 else 0
-            return -(sh - LAMBDA_REG*np.sum(w**2)) if v_ > 0 else 1e6
-        def vo_(w):
-            return np.sqrt(w.T @ cov_ @ w) + LAMBDA_REG*np.sum(w**2)
-        ws = minimize(ns_, x0_, method="SLSQP", bounds=bds, constraints=con).x
-        wm = minimize(vo_, x0_, method="SLSQP", bounds=bds, constraints=con).x
-        return ws, wm
-
-    stability_rows = []
-    for horizon in [3, 5, years]:
-        cutoff  = returns.index[-1] - pd.DateOffset(years=horizon)
-        ret_sub = returns[returns.index >= cutoff]
-        if len(ret_sub) < 252:
-            continue
-        ws_h, wm_h = optimizar_en_ventana(ret_sub)
-        for t, ws, wm in zip(tickers, ws_h, wm_h):
-            stability_rows.append({
-                "Horizonte": f"{horizon} años", "Ticker": t,
-                "Peso Sharpe Máx (%)": round(ws*100, 1),
-                "Peso Mín Vol (%)":    round(wm*100, 1),
-            })
-    df_stability = pd.DataFrame(stability_rows) if stability_rows else pd.DataFrame()
-
-    # =====================================================================
-    # SÍNTESIS — MEJOR PORTAFOLIO
+    # 9) SÍNTESIS ANALÍTICA PARA EL ASISTENTE
     # =====================================================================
     asset_summary = {}
     for ticker in tickers:
@@ -479,60 +447,107 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         }
 
     strategy_summary = {
-        "Sharpe Máximo":    {"retorno": ret_sharpe, "volatilidad": vol_sharpe, "sharpe": sharpe_sharpe, "drawdown": dd_sharpe},
-        "Mínima Volatilidad": {"retorno": ret_minvol, "volatilidad": vol_minvol, "sharpe": sharpe_minvol, "drawdown": dd_minvol},
-        "Pesos Iguales":    {"retorno": ret_equal,  "volatilidad": vol_equal,  "sharpe": sharpe_equal,  "drawdown": dd_equal}
+        "Sharpe Máximo": {
+            "retorno": ret_sharpe, "volatilidad": vol_sharpe,
+            "sharpe": sharpe_sharpe, "drawdown": dd_sharpe
+        },
+        "Mínima Volatilidad": {
+            "retorno": ret_minvol, "volatilidad": vol_minvol,
+            "sharpe": sharpe_minvol, "drawdown": dd_minvol
+        },
+        "Pesos Iguales": {
+            "retorno": ret_equal, "volatilidad": vol_equal,
+            "sharpe": sharpe_equal, "drawdown": dd_equal
+        }
     }
 
-    df_strategies    = pd.DataFrame({"Sharpe Máximo": daily_sharpe, "Mínima Volatilidad": daily_minvol, "Pesos Iguales": daily_equal})
-    years_index      = df_strategies.index.year
-    unique_years     = np.sort(years_index.unique())
-    year_weights     = {y: (i+1)/len(unique_years) for i, y in enumerate(unique_years)}
-    weights_series   = years_index.map(year_weights)
+    df_strategies = pd.DataFrame({
+        "Sharpe Máximo":      daily_sharpe,
+        "Mínima Volatilidad": daily_minvol,
+        "Pesos Iguales":      daily_equal
+    })
+
+    years_index  = df_strategies.index.year
+    unique_years = np.sort(years_index.unique())
+    year_weights = {
+        year: (i + 1) / len(unique_years)
+        for i, year in enumerate(unique_years)
+    }
+    weights_series = years_index.map(year_weights)
+
     weighted_performance = (
-        np.exp(df_strategies.cumsum()).mul(weights_series, axis=0).iloc[-1]
+        (1 + df_strategies).cumprod()
+        .mul(weights_series, axis=0)
+        .iloc[-1]
     )
     best = weighted_performance.idxmax()
 
+    n_assets = len(tickers)
     if best == "Sharpe Máximo":
-        final_weights = weights_sharpe; metodo = "Optimización por Ratio de Sharpe"
+        final_weights = weights_sharpe
+        metodo        = "Optimización por Ratio de Sharpe"
     elif best == "Mínima Volatilidad":
-        final_weights = weights_minvol; metodo = "Optimización por Mínima Volatilidad"
+        final_weights = weights_minvol
+        metodo        = "Optimización por Mínima Volatilidad"
     else:
-        final_weights = weights_equal; metodo = "Asignación Equitativa (Pesos Iguales)"
+        final_weights = np.array([1 / n_assets] * n_assets)
+        metodo        = "Asignación Equitativa (Pesos Iguales)"
 
     df_weights = pd.DataFrame({
-        "Ticker": tickers, "Peso": final_weights.round(4), "Peso (%)": (final_weights*100).round(2)
+        "Ticker":   tickers,
+        "Peso":     final_weights.round(2),
+        "Peso (%)": (final_weights * 100).round(2)
     })
 
     return {
-        "tickers": tickers, "data": data, "returns": returns,
-        "cumulative_assets": cumulative_assets,
-        "daily_sharpe": daily_sharpe, "daily_minvol": daily_minvol, "daily_equal": daily_equal,
-        "cum_sharpe": cum_sharpe, "cum_minvol": cum_minvol, "cum_equal": cum_equal,
-        "df_compare": df_compare, "rolling_vol": rolling_vol, "df_calmar": df_calmar, "df_sortino": df_sortino,
-        "df_mc_stats": df_mc_stats,
-        "mc_simulations_mc":   {"Sharpe Máximo": sim_sharpe_mc, "Mínima Volatilidad": sim_minvol_mc, "Pesos Iguales": sim_equal_mc},
-        "mc_simulations_boot": {"Sharpe Máximo": sim_sharpe_boot, "Mínima Volatilidad": sim_minvol_boot, "Pesos Iguales": sim_equal_boot},
-        "mc_var_mc":   {"Sharpe Máximo": vs_mc, "Mínima Volatilidad": vm_mc, "Pesos Iguales": ve_mc},
-        "mc_cvar_mc":  {"Sharpe Máximo": cs_mc, "Mínima Volatilidad": cm_mc, "Pesos Iguales": ce_mc},
-        "mc_var_bt":   {"Sharpe Máximo": vs_bt, "Mínima Volatilidad": vm_bt, "Pesos Iguales": ve_bt},
-        "mc_cvar_bt":  {"Sharpe Máximo": cs_bt, "Mínima Volatilidad": cm_bt, "Pesos Iguales": ce_bt},
-        "df_stability": df_stability, "df_benchmarks": df_benchmarks, "comparison_cum": comparison_cum,
-        "weighted_performance": weighted_performance, "best": best, "metodo": metodo, "df_weights": df_weights,
-        "efficient_vols": efficient_vols, "efficient_rets": efficient_rets,
-        "rand_vols": rand_vols, "rand_rets": rand_rets, "rand_sharpes": rand_sharpes,
+        "tickers":            tickers,
+        "data":               data,
+        "returns":            returns,
+        "cumulative_assets":  cumulative_assets,
+        "daily_sharpe":       daily_sharpe,
+        "daily_minvol":       daily_minvol,
+        "daily_equal":        daily_equal,
+        "cum_sharpe":         cum_sharpe,
+        "cum_minvol":         cum_minvol,
+        "cum_equal":          cum_equal,
+        "df_compare":         df_compare,
+        "rolling_vol":        rolling_vol,
+        "df_calmar":          df_calmar,
+        "df_sortino":         df_sortino,
+        "df_mc_stats":        df_mc_stats,
+        "mc_simulations": {
+            "Sharpe Máximo":      sim_sharpe,
+            "Mínima Volatilidad": sim_minvol,
+            "Pesos Iguales":      sim_equal
+        },
+        "df_benchmarks":      df_benchmarks,
+        "comparison_cum":     comparison_cum,
+        "weighted_performance": weighted_performance,
+        "best":               best,
+        "metodo":             metodo,
+        "df_weights":         df_weights,
+        "efficient_vols":     efficient_vols,
+        "efficient_rets":     efficient_rets,
         "vol_sharpe": vol_sharpe, "ret_sharpe": ret_sharpe,
         "vol_minvol": vol_minvol, "ret_minvol": ret_minvol,
         "vol_equal":  vol_equal,  "ret_equal":  ret_equal,
-        "asset_summary": asset_summary, "strategy_summary": strategy_summary,
+        "asset_summary":    asset_summary,
+        "strategy_summary": strategy_summary,
         "weights": {
-            "Sharpe Máximo":    dict(zip(tickers, weights_sharpe)),
+            "Sharpe Máximo":      dict(zip(tickers, weights_sharpe)),
             "Mínima Volatilidad": dict(zip(tickers, weights_minvol)),
-            "Pesos Iguales":    dict(zip(tickers, weights_equal))
+            "Pesos Iguales":      dict(zip(tickers, [1 / len(tickers)] * len(tickers)))
         },
-        "retornos":     {"Sharpe Máximo": ret_sharpe, "Mínima Volatilidad": ret_minvol, "Pesos Iguales": ret_equal},
-        "volatilidades":{"Sharpe Máximo": vol_sharpe, "Mínima Volatilidad": vol_minvol, "Pesos Iguales": vol_equal}
+        "retornos": {
+            "Sharpe Máximo":      ret_sharpe,
+            "Mínima Volatilidad": ret_minvol,
+            "Pesos Iguales":      ret_equal
+        },
+        "volatilidades": {
+            "Sharpe Máximo":      vol_sharpe,
+            "Mínima Volatilidad": vol_minvol,
+            "Pesos Iguales":      vol_equal
+        }
     }
 
 
@@ -561,7 +576,12 @@ tickers_input = st.text_input(
     help="Use los códigos bursátiles oficiales. Separe cada ticker con una coma."
 )
 
-years = st.slider("Seleccione el horizonte temporal (años)", min_value=3, max_value=10, value=6)
+years = st.slider(
+    "Seleccione el horizonte temporal (años)",
+    min_value=3,
+    max_value=10,
+    value=6
+)
 
 if st.button("Ejecutar optimización"):
     tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
@@ -600,6 +620,7 @@ if st.session_state.analysis_done:
 
     idx = data.index.tz_localize(None) if getattr(data.index, "tz", None) else data.index
     precios_2025 = data[idx.year == 2025].tail(10)
+
     if precios_2025.empty:
         st.info("No hay datos disponibles para 2025.")
     else:
@@ -609,7 +630,8 @@ if st.session_state.analysis_done:
     st.line_chart(data)
 
     with st.expander("📖 Interpretación – Tendencia de precios"):
-        st.markdown("""
+        st.markdown(
+            """
             **Interpretación:**
 
             Este gráfico muestra la evolución histórica de los precios ajustados de cada activo
@@ -619,185 +641,278 @@ if st.session_state.analysis_done:
             - Periodos de alta pendiente reflejan fases de crecimiento acelerado.
             - Movimientos bruscos o caídas pronunciadas suelen asociarse a eventos de mercado
               o episodios de alta volatilidad.
-        """)
+
+            Este análisis permite identificar activos con comportamientos más estables
+            frente a otros con mayor variabilidad en el tiempo.
+            """
+        )
 
     # =====================================================================
-    # COMPARACIÓN DE ESTRATEGIAS
+    # 8) COMPARACIÓN SISTEMÁTICA DE ESTRATEGIAS
     # =====================================================================
     st.subheader("Comparación sistemática de estrategias")
     st.dataframe(r["df_compare"])
 
     with st.expander("📖 Interpretación – Comparación de estrategias"):
-        st.markdown("""
+        st.markdown(
+            """
             **Cómo interpretar esta tabla:**
             - **Retorno acumulado:** cuánto creció el capital total en el periodo.
             - **Volatilidad:** magnitud de las fluctuaciones (riesgo).
             - **Sharpe:** eficiencia riesgo–retorno.
             - **Máx Drawdown:** peor caída histórica desde un máximo.
 
-            La estrategia de **Sharpe Máximo** tiende a ofrecer el mayor retorno ajustado por riesgo.
-            La estrategia de **Mínima Volatilidad** prioriza la estabilidad del capital.
-            La estrategia de **Pesos Iguales** actúa como referencia neutral sin optimización explícita.
-        """)
+            **Interpretación analítica de la comparación de estrategias:**
+
+            Esta tabla sintetiza el desempeño de las distintas estrategias
+            de construcción de portafolios bajo un enfoque riesgo–retorno,
+            permitiendo una evaluación integral y comparativa.
+
+            - La estrategia de **Sharpe Máximo** tiende a ofrecer el mayor
+              retorno ajustado por riesgo, aunque suele presentar niveles
+              más elevados de volatilidad y drawdowns en periodos adversos.
+            - La estrategia de **Mínima Volatilidad** prioriza la estabilidad
+              del capital, reduciendo la exposición a caídas pronunciadas,
+              a costa de un menor potencial de crecimiento.
+            - La estrategia de **Pesos Iguales** actúa como referencia neutral,
+              proporcionando una diversificación básica sin optimización explícita.
+
+            La combinación de métricas como retorno anual, volatilidad,
+            Ratio de Sharpe y máximo drawdown permite identificar no solo
+            la estrategia más rentable, sino también la más resiliente
+            frente a escenarios de estrés de mercado.
+
+            Este análisis respalda decisiones de asignación de activos
+            alineadas con el horizonte temporal y el perfil de riesgo del inversor.
+            """
+        )
 
     st.subheader("Volatilidad histórica móvil")
     st.line_chart(r["rolling_vol"])
 
     with st.expander("📖 Interpretación – Volatilidad histórica móvil"):
-        st.markdown("""
+        st.markdown(
+            """
             **Interpretación:**
             Esta gráfica muestra cómo el riesgo **cambia en el tiempo**.
             - Picos altos suelen coincidir con periodos de crisis.
             - Estrategias más estables presentan curvas más suaves.
-        """)
+
+            La volatilidad histórica móvil permite analizar cómo
+            evoluciona el riesgo del portafolio a lo largo del tiempo,
+            capturando cambios estructurales en el comportamiento del mercado.
+
+            - Incrementos abruptos de la volatilidad suelen coincidir
+              con periodos de crisis financiera o incertidumbre macroeconómica.
+            - Curvas más suaves indican estrategias con mayor estabilidad
+              y menor sensibilidad a shocks de mercado.
+
+            En el análisis comparativo:
+            - El portafolio de **Sharpe Máximo** presenta picos de
+              volatilidad más elevados, reflejando una mayor exposición
+              al riesgo en escenarios adversos.
+            - La estrategia de **Mínima Volatilidad** mantiene un perfil
+              de riesgo más controlado a lo largo del tiempo.
+            - La asignación de **Pesos Iguales** muestra un comportamiento
+              intermedio, replicando parcialmente la dinámica del mercado.
+
+            Este enfoque dinámico del riesgo complementa las métricas
+            estáticas tradicionales y aporta una visión más realista
+            del comportamiento del portafolio.
+            """
+        )
 
     st.subheader("Ratio Calmar (retorno vs drawdown)")
     st.dataframe(r["df_calmar"])
 
     with st.expander("📖 Interpretación – Ratio Calmar"):
-        st.markdown("""
+        st.markdown(
+            """
             **Interpretación analítica del Ratio Calmar:**
 
-            El Ratio Calmar relaciona el **retorno anual esperado** con el **máximo drawdown histórico**.
-            Un valor elevado indica que la estrategia logra retornos atractivos manteniendo caídas
-            controladas. Resulta especialmente relevante para inversionistas conservadores.
-        """)
+            El Ratio Calmar relaciona el **retorno anual esperado** con el
+            **máximo drawdown histórico**, ofreciendo una medida directa
+            de la capacidad del portafolio para generar rentabilidad
+            sin incurrir en pérdidas extremas prolongadas.
+
+            - Un **Ratio Calmar elevado** indica que la estrategia logra
+              retornos atractivos manteniendo caídas relativamente
+              controladas.
+            - Valores bajos sugieren que el retorno obtenido no compensa
+              adecuadamente las pérdidas máximas sufridas.
+            - Esta métrica resulta especialmente relevante para
+              inversionistas con enfoque conservador o con restricciones
+              estrictas de preservación de capital.
+
+            A diferencia del Ratio de Sharpe, el Calmar se centra en el
+            **riesgo extremo observado**, lo que lo convierte en un
+            indicador complementario para evaluar la resiliencia del
+            portafolio en periodos de crisis o alta volatilidad.
+
+            En el contexto del presente análisis, el Ratio Calmar permite
+            identificar qué estrategia ofrece un **mejor equilibrio entre
+            crecimiento del capital y control de pérdidas severas**,
+            reforzando la robustez del proceso de selección de portafolios.
+            """
+        )
 
     st.subheader("Ratio Sortino")
     st.dataframe(r["df_sortino"])
 
     with st.expander("📖 Interpretación – Ratio Sortino"):
-        st.markdown("""
+        st.markdown(
+            """
             **Interpretación analítica del Ratio Sortino:**
 
-            Evalúa el desempeño considerando exclusivamente la **volatilidad negativa**.
-            Un valor más alto indica mayor retorno por unidad de riesgo a la baja.
-            A diferencia del Sharpe, no penaliza la volatilidad positiva.
-        """)
+            El Ratio Sortino evalúa el desempeño del portafolio considerando
+            exclusivamente la **volatilidad negativa**, es decir, aquellas
+            fluctuaciones que representan pérdidas para el inversor.
+
+            - Un **valor más alto de Sortino** indica que la estrategia genera
+              mayor retorno por cada unidad de riesgo a la baja asumida.
+            - A diferencia del Ratio de Sharpe, este indicador **no penaliza
+              la volatilidad positiva**, lo que lo convierte en una métrica
+              más alineada con la percepción real del riesgo por parte del inversor.
+            - Estrategias con Sortino elevado suelen ser más adecuadas para
+              escenarios de mercado inciertos o para perfiles que priorizan
+              la protección frente a caídas.
+
+            En el contexto del análisis comparativo, el Ratio Sortino permite
+            identificar qué estrategia ofrece una **mejor compensación entre
+            retorno y riesgo negativo**, aportando una visión complementaria
+            y más conservadora al proceso de toma de decisiones.
+            """
+        )
 
     # =====================================================================
-    # MONTE CARLO — KDE SUAVIZADO, GRÁFICA ÚNICA
+    # 8.3.5) SIMULACIÓN MONTE CARLO — CAMBIO 1: KDE suavizado, gráfica única
     # =====================================================================
     st.subheader("Simulación Monte Carlo – Análisis de riesgo forward-looking")
     st.dataframe(r["df_mc_stats"])
 
-    _mc1, _mc2, _mc3 = st.columns([0.1, 3.5, 0.1])
+    _mc1, _mc2, _mc3 = st.columns([0.3, 2.5, 0.3])
     with _mc2:
         from scipy.stats import gaussian_kde
 
-        strat_colors = [COLORS["sharpe"], COLORS["minvol"], COLORS["equal"]]
-        strat_names  = ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"]
+        colors     = ["#00d9ff", "#66ff99", "#ff9966"]
+        var_values = [r["df_mc_stats"]["VaR 95%"].iloc[i] for i in range(3)]
 
-        fig_mc, ax = plt.subplots(figsize=(13, 6))
-        apply_dark_style(fig_mc, ax)
-        fig_mc.suptitle("Distribución de Retornos Anuales Simulados – KDE (5,000 escenarios)",
-                         color=COLORS["sharpe"], fontsize=12, fontweight="bold", y=1.01)
+        fig_mc, ax_mc = plt.subplots(figsize=(10, 5))
 
-        # Usamos Monte Carlo paramétrico como fuente principal del KDE
-        sims_dict = r["mc_simulations_mc"]
-        var_dict  = r["mc_var_mc"]
-
-        for name, color in zip(strat_names, strat_colors):
-            sims = sims_dict[name]
+        for (name, sims), color, var_val in zip(
+            r["mc_simulations"].items(), colors, var_values
+        ):
             # Rango limpio: percentil 0.5 – 99.5
-            x_min = np.percentile(sims, 0.5)
-            x_max = np.percentile(sims, 99.5)
+            x_min  = np.percentile(sims, 0.5)
+            x_max  = np.percentile(sims, 99.5)
             x_grid = np.linspace(x_min, x_max, 400)
 
-            kde = gaussian_kde(sims, bw_method=0.15)
+            kde   = gaussian_kde(sims, bw_method=0.15)
             y_kde = kde(x_grid)
 
-            # Curva KDE principal
-            ax.plot(x_grid, y_kde, color=color, linewidth=2.2, label=name, zorder=3)
-            # Área bajo la curva semitransparente
-            ax.fill_between(x_grid, y_kde, alpha=0.12, color=color, zorder=2)
+            # Curva KDE + área semitransparente
+            ax_mc.plot(x_grid, y_kde, color=color, linewidth=2.2, label=name, zorder=3)
+            ax_mc.fill_between(x_grid, y_kde, alpha=0.12, color=color, zorder=2)
 
-            # Línea VaR vertical
-            var_val = var_dict[name]
-            ax.axvline(var_val, color=color, linestyle="--", linewidth=1.4, alpha=0.85,
-                       label=f"VaR {name[:6]} = {var_val:.1%}", zorder=4)
+            # Línea VaR punteada
+            ax_mc.axvline(var_val, color=color, linestyle="--", linewidth=1.4,
+                          alpha=0.85, label=f"VaR {name[:6]} = {var_val:.1%}", zorder=4)
 
         # Línea del cero
-        ax.axvline(0, color="white", linestyle="-", linewidth=1.6, alpha=0.45, zorder=5)
-        ax.text(0, 1.0, "0%", color="white", fontsize=8, alpha=0.7,
-                transform=ax.get_xaxis_transform(), ha="center", va="bottom")
+        ax_mc.axvline(0, color="white", linestyle="-", linewidth=1.6, alpha=0.45, zorder=5)
+        ax_mc.text(0, 1.0, "0%", color="white", fontsize=8, alpha=0.7,
+                   transform=ax_mc.get_xaxis_transform(), ha="center", va="bottom")
 
-        ax.set_xlabel("Retorno anual simulado", fontsize=10)
-        ax.set_ylabel("Densidad de probabilidad", fontsize=10)
-        ax.set_ylim(bottom=0)
-        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
+        ax_mc.set_xlabel("Retorno anual simulado")
+        ax_mc.set_ylabel("Densidad de probabilidad")
+        ax_mc.set_title("Distribución de retornos anuales – KDE (5,000 simulaciones)")
+        ax_mc.set_ylim(bottom=0)
+        ax_mc.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
+        ax_mc.legend(fontsize=8, ncol=2)
+        ax_mc.grid(True, alpha=0.2)
 
-        ax.legend(fontsize=8, facecolor="#252d3f", edgecolor=COLORS["border"],
-                  labelcolor=COLORS["text"], loc="upper left", ncol=2,
-                  framealpha=0.9, bbox_to_anchor=(0.01, 0.99))
-
-        plt.tight_layout()
         st.pyplot(fig_mc)
         plt.close(fig_mc)
 
     with st.expander("📖 Interpretación – Simulación Monte Carlo"):
-        st.markdown("""
+        st.markdown(
+        """
         **Interpretación analítica de la Simulación Monte Carlo:**
 
-        La simulación genera 5,000 escenarios posibles de retorno anual para cada estrategia
-        utilizando la media y la matriz de covarianza estimadas. Permite evaluar el
+        La simulación genera 5.000 escenarios posibles de retorno anual para cada estrategia
+        utilizando la media y la matriz de covarianza estimadas. Esto permite evaluar el
         comportamiento del portafolio bajo incertidumbre futura, no solo con datos históricos.
 
-        **Monte Carlo vs Bootstrap:**
-        - El gráfico izquierdo asume distribución normal multivariada.
-        - El gráfico derecho remuestrea bloques de retornos históricos reales, sin asumir normalidad.
-        - Las líneas punteadas indican el **VaR 95%** de cada estrategia.
-        - Si ambos métodos coinciden, el resultado es más robusto.
+        **¿Cómo interpretar las distribuciones?**
 
-        **Métricas clave:**
-        - **VaR 95%:** pérdida máxima en el 5% de los peores escenarios.
+        - Las curvas más desplazadas hacia la derecha indican mayor retorno esperado.
+        - Las distribuciones más estrechas reflejan menor volatilidad y mayor estabilidad.
+        - Una mayor concentración de valores a la izquierda del cero implica mayor probabilidad de pérdida.
+
+        **Métricas clave de riesgo extremo:**
+        - **VaR 95%:** pérdida máxima esperada en el 5% de los peores escenarios.
         - **CVaR 95%:** promedio de las pérdidas en esos escenarios extremos.
-        - **Probabilidad de pérdida:** porcentaje de escenarios con retorno negativo.
-        """)
+        - **Probabilidad de pérdida:** porcentaje de escenarios con retorno anual negativo.
+
+        **Lectura estratégica:**
+
+        - El portafolio de **Sharpe Máximo** tiende a mostrar mayor retorno esperado,
+          aunque con mayor dispersión y exposición a escenarios adversos.
+        - El portafolio de **Mínima Volatilidad** presenta una distribución más compacta,
+          reduciendo la severidad de pérdidas extremas, pero con menor potencial de crecimiento.
+        - La estrategia de **Pesos Iguales** actúa como referencia neutral sin optimización específica.
+
+        En términos prácticos, la mejor estrategia dependerá del perfil del inversor:
+
+        - Si se prioriza maximizar retorno ajustado por riesgo → **Sharpe Máximo**.
+        - Si se prioriza estabilidad y control de pérdidas extremas → **Mínima Volatilidad**.
+
+        La decisión óptima surge del equilibrio entre retorno esperado y tolerancia al riesgo extremo.
+        """
+        )
 
     # =====================================================================
-    # ESTABILIDAD DE PESOS
-    # =====================================================================
-    if not r["df_stability"].empty:
-        st.subheader("Estabilidad de pesos por horizonte temporal")
-        st.dataframe(r["df_stability"], use_container_width=True)
-
-        with st.expander("📖 Interpretación – Estabilidad de pesos por periodo"):
-            st.markdown("""
-                **Interpretación analítica de la estabilidad de pesos:**
-
-                Esta tabla muestra cómo cambian los pesos óptimos cuando se re-optimiza
-                con ventanas históricas de 3, 5 y todos los años disponibles.
-
-                - Pesos **similares entre horizontes** → estrategia robusta y confiable.
-                - Pesos **muy variables** → mayor sensibilidad al periodo de entrenamiento.
-
-                En una defensa técnica, la estabilidad de pesos es un argumento clave:
-                demuestra que la solución no es un artefacto del periodo de datos.
-            """)
-
-    # =====================================================================
-    # COVID 2020
+    # 8.4) PERIODOS DE CRISIS (COVID 2020)
     # =====================================================================
     st.subheader("Comportamiento en periodo de crisis (COVID 2020)")
+
     crisis = (cum_sharpe.index.year == 2020)
     st.line_chart(pd.DataFrame({
-        "Sharpe Máximo": cum_sharpe[crisis],
+        "Sharpe Máximo":      cum_sharpe[crisis],
         "Mínima Volatilidad": cum_minvol[crisis],
-        "Pesos Iguales": cum_equal[crisis]
+        "Pesos Iguales":      cum_equal[crisis]
     }))
 
     with st.expander("📖 Interpretación – Comportamiento en crisis (COVID 2020)"):
-        st.markdown("""
+        st.markdown(
+            """
             **Interpretación del comportamiento en periodo de crisis:**
 
-            Permite evaluar la profundidad de la caída, la velocidad de recuperación
-            y la resiliencia relativa de cada estrategia ante eventos extremos.
-            Las estrategias de mínima volatilidad suelen contener mejor las caídas iniciales.
-        """)
+            Esta visualización muestra el desempeño de las distintas
+            estrategias durante un periodo de estrés sistémico,
+            caracterizado por alta volatilidad y caídas abruptas del mercado.
+
+            El análisis permite evaluar:
+            - La **profundidad de la caída** inicial (drawdown).
+            - La **velocidad de recuperación** tras el shock.
+            - La **resiliencia relativa** de cada estrategia ante eventos extremos.
+
+            Los resultados evidencian que:
+            - Las estrategias optimizadas para maximizar el retorno
+              (como Sharpe Máximo) tienden a experimentar caídas más
+              pronunciadas en el corto plazo.
+            - Las estrategias orientadas a la reducción de riesgo
+              (Mínima Volatilidad) presentan una mayor capacidad de
+              contención de pérdidas.
+
+            Este análisis refuerza la idea de que la eficiencia
+            riesgo–retorno debe evaluarse no solo en condiciones normales,
+            sino también bajo escenarios adversos.
+            """
+        )
 
     # =====================================================================
-    # BENCHMARKS
+    # 8.5) COMPARACIÓN CON BENCHMARKS DE MERCADO
     # =====================================================================
     st.subheader("Comparación con benchmarks de mercado")
     st.dataframe(r["df_benchmarks"])
@@ -805,19 +920,55 @@ if st.session_state.analysis_done:
     with st.expander("📖 ¿Qué es un benchmark? – S&P 500, MSCI y NASDAQ explicados"):
         st.markdown("""
         ### ¿Qué es un benchmark?
-        Un **benchmark** es un punto de referencia para evaluar si una estrategia es buena o mala.
 
-        ### S&P 500 — referencia del mercado americano
-        Agrupa ~500 empresas grandes de EE.UU. Si una estrategia no lo supera en el largo plazo,
-        resulta difícil justificar su complejidad frente a una inversión pasiva.
+        Un **benchmark** es un **punto de referencia** que se utiliza para evaluar si una estrategia de inversión es buena o mala.
+        Funciona de forma similar a una *regla de medición*: permite comparar los resultados obtenidos con una alternativa estándar y ampliamente utilizada en los mercados financieros.
 
-        ### MSCI World — diversificación global
-        Representa empresas de países desarrollados. Permite evaluar si la estrategia supera
-        una cartera globalmente diversificada.
+        En este trabajo, los benchmarks representan **formas simples y comunes de invertir**, frente a las cuales se comparan las estrategias optimizadas desarrolladas en la aplicación.
 
-        ### NASDAQ 100 — referencia de crecimiento tecnológico
-        Alta concentración en tecnología. Mayor potencial de crecimiento pero también mayor
-        volatilidad, especialmente en momentos de crisis.
+        ### ¿Qué representa el S&P 500?
+
+        El **S&P 500** es uno de los índices bursátiles más conocidos del mundo. Agrupa a aproximadamente **500 de las empresas más grandes de Estados Unidos**, como Apple, Microsoft o Google.
+        Invertir en el S&P 500 se considera una aproximación al comportamiento general del mercado y suele utilizarse como referencia básica para evaluar el desempeño de cualquier portafolio.
+
+        Si una estrategia no logra superar al S&P 500 en el largo plazo, resulta difícil justificar su complejidad frente a una inversión pasiva en el mercado.
+
+        ### ¿Qué es el MSCI?
+
+        **MSCI** (Morgan Stanley Capital International) es una empresa internacional que elabora **índices bursátiles** utilizados como referencia en todo el mundo.
+        Un índice MSCI representa el comportamiento de un conjunto amplio de empresas de una región o del mercado global.
+
+        Por ejemplo:
+        - **MSCI World** agrupa empresas grandes y medianas de países desarrollados.
+        - **MSCI Emerging Markets** representa mercados emergentes.
+
+        Estos índices se utilizan como benchmark porque reflejan el desempeño promedio de mercados completos y permiten evaluar si una estrategia supera o no una inversión diversificada a nivel internacional.
+
+        ### ¿Qué es el NASDAQ?
+
+        El **NASDAQ** es una bolsa de valores estadounidense caracterizada por una **alta concentración de empresas tecnológicas y de innovación**, como Apple, Microsoft, Amazon o Google.
+        El índice NASDAQ suele mostrar mayores crecimientos en periodos de expansión económica, pero también presenta **mayor volatilidad** en momentos de crisis.
+
+        Por esta razón, el NASDAQ se utiliza como benchmark para comparar estrategias con un perfil más dinámico y orientado al crecimiento, especialmente en sectores tecnológicos.
+
+        ### ¿Por qué se incluyen estos índices como benchmarks?
+
+        La inclusión del **S&P 500, MSCI y NASDAQ** permite comparar los portafolios optimizados con:
+        - El comportamiento general del mercado estadounidense (S&P 500),
+        - Una referencia de diversificación global (MSCI),
+        - Un mercado de alto crecimiento y mayor riesgo (NASDAQ).
+
+        De esta forma, se obtiene una evaluación más completa del desempeño relativo de las estrategias desarrolladas en la aplicación.
+
+        ### ¿Por qué se comparan varias estrategias?
+
+        Además del S&P 500, se incluyen otras estrategias como:
+        - **Pesos iguales**, donde todos los activos reciben la misma proporción.
+        - **Portafolio de mínima volatilidad**, orientado a reducir el riesgo.
+        - **Portafolio de Sharpe máximo**, que busca el mejor retorno ajustado por riesgo.
+
+        La comparación con estos benchmarks permite responder una pregunta clave:
+        **¿La optimización realmente mejora los resultados frente a alternativas simples y ampliamente utilizadas?**
         """)
 
     st.subheader("Rendimiento acumulado: estrategias vs benchmarks")
@@ -825,211 +976,241 @@ if st.session_state.analysis_done:
 
     with st.expander("📖 Interpretación – Rendimiento acumulado vs benchmarks"):
         st.markdown("""
-        La línea que termina más arriba representa la estrategia con mayor crecimiento acumulado.
-        Curvas más suaves indican menor volatilidad. Si una estrategia optimizada supera de forma
-        consistente a los benchmarks, confirma que el modelo aporta valor frente a inversión pasiva.
+        **Cómo interpretar la gráfica de rendimiento acumulado**
+
+        Esta gráfica muestra cómo habría evolucionado una inversión inicial a lo largo del tiempo bajo cada estrategia.
+
+        - La línea que termina **más arriba** representa la estrategia con **mayor crecimiento acumulado**.
+        - Las curvas más **suaves y estables** indican menor volatilidad y menor exposición a crisis.
+        - Caídas pronunciadas reflejan periodos de estrés de mercado; una recuperación rápida indica mayor resiliencia.
+        - Si una estrategia optimizada supera de forma consistente a los benchmarks, se confirma que el modelo aporta valor frente a una inversión pasiva.
+
+        La interpretación conjunta del gráfico permite evaluar no solo cuánto se gana, sino **cómo se gana**, identificando estrategias más robustas frente a escenarios adversos.
         """)
 
     # =====================================================================
-    # MEJOR PORTAFOLIO
+    # 9) SÍNTESIS — INTERPRETACIÓN FINAL PONDERADA EN EL TIEMPO
     # =====================================================================
     st.subheader("Interpretación automática del mejor portafolio")
     st.dataframe(r["weighted_performance"].rename("Desempeño_Ponderado"))
 
     if best == "Pesos Iguales":
-        st.markdown("### Mejor portafolio: Pesos Iguales\n\nEsta estrategia ha sido la más robusta y consistente, con menor dependencia de supuestos estadísticos.")
+        st.markdown(
+            "### Mejor portafolio: Pesos Iguales\n\n"
+            "El análisis del **comportamiento real del portafolio en el tiempo**, "
+            "ponderando más los años recientes, muestra que esta estrategia ha sido "
+            "la **más robusta y consistente**.\n\n"
+            "- Menor dependencia de supuestos estadísticos.\n"
+            "- Mejor desempeño agregado a lo largo del tiempo.\n"
+            "- Alta estabilidad frente a cambios de mercado."
+        )
     elif best == "Sharpe Máximo":
-        st.markdown("### Mejor portafolio: Sharpe Máximo\n\nOfrece el mejor equilibrio riesgo–retorno en el comportamiento histórico reciente.")
+        st.markdown(
+            "### Mejor portafolio: Sharpe Máximo\n\n"
+            "La evaluación temporal indica que esta estrategia ofrece el mejor "
+            "equilibrio riesgo–retorno en el comportamiento histórico reciente."
+        )
     else:
-        st.markdown("### Mejor portafolio: Mínima Volatilidad\n\nDestaca por su estabilidad, aunque sacrifica retorno frente a las demás estrategias.")
+        st.markdown(
+            "### Mejor portafolio: Mínima Volatilidad\n\n"
+            "Esta estrategia destaca por su estabilidad, aunque sacrifica retorno "
+            "frente a las demás."
+        )
 
     st.success(f"Portafolio recomendado según comportamiento real ponderado: {best}")
 
     # =====================================================================
-    # PESOS ÓPTIMOS — GRÁFICO PREMIUM REDISEÑADO
+    # PESOS ÓPTIMOS — CAMBIO 2: sin línea de pesos iguales ni su leyenda
     # =====================================================================
     st.subheader("Pesos óptimos del portafolio recomendado")
 
     df_weights = r["df_weights"]
     st.dataframe(df_weights)
 
-    _pw1, _pw2, _pw3 = st.columns([0.3, 2.5, 0.3])
-    with _pw2:
-        tickers_w = df_weights["Ticker"].tolist()
-        pesos_w   = df_weights["Peso (%)"].tolist()
-        n_w       = len(tickers_w)
-
-        # Paleta degradada cian → verde
-        palette = [
-            mcolors.to_hex(
-                plt.cm.cool(0.15 + 0.7 * i / max(n_w - 1, 1))
-            )
-            for i in range(n_w)
-        ]
-
-        fig_w, ax_w = plt.subplots(figsize=(9, max(3.5, n_w * 0.7)))
-        apply_dark_style(fig_w, ax_w)
-
-        bars = ax_w.barh(
-            tickers_w, pesos_w,
-            color=palette, edgecolor=COLORS["bg"], linewidth=0.8,
-            height=0.55
-        )
-
-        # Etiquetas de valor al final de cada barra
-        for bar, val in zip(bars, pesos_w):
-            x_pos = bar.get_width() + 0.5
-            ax_w.text(
-                x_pos, bar.get_y() + bar.get_height() / 2,
-                f"{val:.1f}%",
-                va="center", ha="left", fontsize=9,
-                color=COLORS["text"], fontweight="600"
-            )
-
-        ax_w.set_xlabel("Peso en el portafolio (%)", fontsize=9)
-        ax_w.set_xlim(0, max(pesos_w) * 1.22)
-        ax_w.set_title(
-            f"Composición del portafolio recomendado\n{metodo}",
-            fontsize=10, fontweight="bold", pad=10
-        )
-        ax_w.invert_yaxis()
-
-        plt.tight_layout()
-        st.pyplot(fig_w)
-        plt.close(fig_w)
+    _cw1, _cw2, _cw3 = st.columns([0.5, 2, 0.5])
+    with _cw2:
+        fig, ax = plt.subplots(figsize=(6, 3.5))
+        ax.barh(df_weights["Ticker"], df_weights["Peso (%)"])
+        ax.set_xlabel("Peso en el portafolio (%)")
+        ax.set_title(f"Composición del portafolio recomendado\n({metodo})")
+        ax.grid(True, alpha=0.2)
+        st.pyplot(fig)
+        plt.close(fig)
 
     with st.expander("📖 Interpretación – Pesos óptimos del portafolio recomendado"):
-        st.markdown(f"""
+        st.markdown(
+            f"""
             ### Interpretación de los pesos
 
-            Los pesos mostrados corresponden al portafolio recomendado (**{best}**).
-            La línea punteada blanca indica el peso que tendría cada activo en una distribución equitativa.
+            Los pesos mostrados corresponden **exclusivamente** al portafolio
+            recomendado por el modelo (**{best}**).
 
-            - Barras a la **derecha de la línea** → el modelo sobrepondera ese activo.
-            - Barras a la **izquierda de la línea** → el modelo subpondera ese activo.
-            - Un **peso del 40%** significa que 40 de cada 100 unidades monetarias se asignan ahí.
-        """)
+            - Cada peso indica qué proporción del capital debe asignarse a cada activo.
+            - La suma total de los pesos es del **100%**.
+            - Esta asignación refleja el comportamiento histórico del portafolio
+              bajo el criterio seleccionado.
+
+            ### Explicación extendida de los pesos óptimos
+
+            Los **pesos óptimos** indican cómo distribuir el capital para obtener
+            el mejor balance entre **riesgo y retorno**, según el modelo de Markowitz.
+
+            - Un **peso del 40%** significa que **40 de cada 100 unidades monetarias**
+              se asignan a ese activo.
+            - **Pesos altos** reflejan activos que aportan mayor eficiencia al portafolio.
+            - **Pesos bajos** indican activos que añaden más riesgo que beneficio relativo.
+
+            Para personas sin experiencia previa,
+            esta tabla funciona como una **guía práctica de asignación de capital**,
+            evitando decisiones intuitivas o emocionales.
+            """
+        )
 
     st.success("Análisis del portafolio ejecutado correctamente")
 
     # =====================================================================
-    # RENDIMIENTOS ACUMULADOS
+    # 10) RENDIMIENTOS ACUMULADOS
     # =====================================================================
     st.subheader("Rendimiento acumulado por acción")
     st.line_chart(r["cumulative_assets"])
 
     st.subheader("Comparación de rendimientos de estrategias")
     st.line_chart(pd.DataFrame({
-        "Sharpe Máximo": cum_sharpe, "Mínima Volatilidad": cum_minvol, "Pesos Iguales": cum_equal
+        "Sharpe Máximo":      cum_sharpe,
+        "Mínima Volatilidad": cum_minvol,
+        "Pesos Iguales":      cum_equal
     }))
 
-    with st.expander("📖 Interpretación – Rendimiento acumulado"):
-        st.markdown("""
+    with st.expander("📖 Interpretación – Rendimiento acumulado por acción"):
+        st.markdown(
+            """
+            **Interpretación:**
+
             El rendimiento acumulado refleja cómo habría evolucionado una inversión inicial
-            en cada activo durante todo el periodo. Curvas más empinadas indican mayor crecimiento.
-        """)
+            en cada activo si se hubiera mantenido durante todo el periodo de análisis.
+
+            - Curvas más empinadas indican mayor crecimiento del capital.
+            - Activos con mayor volatilidad suelen mostrar trayectorias más irregulares.
+            - Diferencias significativas entre curvas evidencian distintos perfiles
+              de riesgo y rentabilidad.
+
+            Este gráfico facilita la comparación directa del desempeño histórico
+            entre los activos analizados.
+            """
+        )
 
     st.subheader("Retornos diarios de los activos")
     st.line_chart(returns)
 
-    with st.expander("📖 Interpretación – Retornos diarios"):
-        st.markdown("""
-            Muestra los retornos porcentuales diarios de cada activo.
-            Picos positivos o negativos representan movimientos abruptos del mercado.
-            Periodos de alta concentración de picos suelen coincidir con crisis financieras.
-        """)
+    with st.expander("📖 Interpretación – Retornos diarios de los activos"):
+        st.markdown(
+            """
+            **Interpretación:**
+
+            Este gráfico muestra los retornos porcentuales diarios de cada activo,
+            evidenciando la volatilidad de corto plazo.
+
+            - Picos positivos o negativos representan movimientos abruptos del mercado.
+            - Mayor dispersión implica mayor riesgo.
+            - Periodos de alta concentración de picos suelen coincidir con crisis financieras
+              o eventos macroeconómicos relevantes.
+
+            Este análisis es clave para evaluar el riesgo diario asumido por el inversor.
+            """
+        )
 
     st.subheader("Retornos diarios por activo")
+
     for ticker in returns.columns:
         st.markdown(f"### {ticker}")
         st.line_chart(returns[[ticker]])
 
+    with st.expander("📖 Interpretación – Retornos diarios por activo individual"):
+        st.markdown(
+            """
+            **Interpretación:**
+
+            Este gráfico muestra el comportamiento diario del retorno del activo,
+            permitiendo identificar:
+
+            - Frecuencia e intensidad de pérdidas y ganancias.
+            - Presencia de volatilidad asimétrica (más caídas que subidas).
+            - Episodios de estrés específicos para el activo.
+
+            Resulta útil para evaluar el riesgo individual antes de integrarlo
+            dentro de un portafolio diversificado.
+            """
+        )
+
     # =====================================================================
-    # FRONTERA EFICIENTE — GRÁFICO PREMIUM REDISEÑADO
+    # 11) FRONTERA EFICIENTE
     # =====================================================================
     st.subheader("Frontera eficiente (Retorno vs Volatilidad)")
 
-    _fe1, _fe2, _fe3 = st.columns([0.2, 3, 0.2])
-    with _fe2:
-        fig_fe, ax_fe = plt.subplots(figsize=(10, 6))
-        apply_dark_style(fig_fe, ax_fe)
+    _col1, _col2, _col3 = st.columns([0.5, 2, 0.5])
+    with _col2:
+        fig2, ax2 = plt.subplots(figsize=(6, 4))
 
-        # Nube de portafolios aleatorios coloreados por Sharpe
-        sc = ax_fe.scatter(
-            r["rand_vols"], r["rand_rets"],
-            c=r["rand_sharpes"], cmap="plasma",
-            s=12, alpha=0.35, linewidths=0, zorder=1
-        )
-        cbar = plt.colorbar(sc, ax=ax_fe, pad=0.02)
-        cbar.set_label("Ratio de Sharpe", color=COLORS["text"], fontsize=8)
-        cbar.ax.yaxis.set_tick_params(color=COLORS["text"])
-        plt.setp(cbar.ax.yaxis.get_ticklabels(), color=COLORS["text"], fontsize=7)
-        cbar.outline.set_edgecolor(COLORS["border"])
-
-        # Línea de la frontera eficiente
-        ax_fe.plot(
-            r["efficient_vols"], r["efficient_rets"],
-            color=COLORS["sharpe"], linewidth=2.5, zorder=3,
-            label="Frontera eficiente",
-            path_effects=[pe.withStroke(linewidth=5, foreground="#00d9ff20")]
-        )
-
-        # Puntos de las tres estrategias
-        strategy_points = [
-            (r["vol_sharpe"], r["ret_sharpe"], COLORS["sharpe"],  "★", "Sharpe Máximo"),
-            (r["vol_minvol"], r["ret_minvol"], COLORS["minvol"],  "▲", "Mínima Volatilidad"),
-            (r["vol_equal"],  r["ret_equal"],  COLORS["equal"],   "■", "Pesos Iguales"),
-        ]
-
-        for vx, ry, color, marker_char, label in strategy_points:
-            ax_fe.scatter(vx, ry, s=180, color=color, zorder=5,
-                          edgecolors="white", linewidths=1.2,
-                          label=label)
-            ax_fe.annotate(
-                label,
-                (vx, ry),
-                xytext=(10, 8), textcoords="offset points",
-                fontsize=8, color=color, fontweight="bold",
-                path_effects=[pe.withStroke(linewidth=2.5, foreground=COLORS["bg"])]
-            )
-
-        ax_fe.set_xlabel("Volatilidad anual (riesgo)", fontsize=9)
-        ax_fe.set_ylabel("Retorno anual esperado", fontsize=9)
-        ax_fe.set_title(
-            "Frontera Eficiente de Markowitz\nPortafolios aleatorios coloreados por Ratio de Sharpe",
-            fontsize=10, fontweight="bold", pad=12
-        )
-
-        ax_fe.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
-        ax_fe.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
-
-        legend = ax_fe.legend(
-            fontsize=8, facecolor="#252d3f", edgecolor=COLORS["border"],
-            labelcolor=COLORS["text"], loc="lower right", framealpha=0.9
-        )
-
-        plt.tight_layout()
-        st.pyplot(fig_fe)
-        plt.close(fig_fe)
+        ax2.plot(r["efficient_vols"], r["efficient_rets"],
+                 linestyle="-", linewidth=2, label="Frontera eficiente")
+        ax2.scatter(r["vol_sharpe"], r["ret_sharpe"],
+                    s=90, marker="o", label="Sharpe Máximo")
+        ax2.scatter(r["vol_minvol"], r["ret_minvol"],
+                    s=90, marker="^", label="Mínima Volatilidad")
+        ax2.scatter(r["vol_equal"],  r["ret_equal"],
+                    s=90, marker="s", label="Pesos Iguales")
+        ax2.annotate("Sharpe Máximo",
+                     (r["vol_sharpe"], r["ret_sharpe"]),
+                     xytext=(8, 8), textcoords="offset points", fontweight="bold")
+        ax2.annotate("Mínima Volatilidad",
+                     (r["vol_minvol"], r["ret_minvol"]),
+                     xytext=(8, -12), textcoords="offset points", fontweight="bold")
+        ax2.annotate("Pesos Iguales",
+                     (r["vol_equal"], r["ret_equal"]),
+                     xytext=(8, 8), textcoords="offset points", fontweight="bold")
+        ax2.set_xlabel("Volatilidad anual (riesgo)")
+        ax2.set_ylabel("Retorno anual esperado")
+        ax2.set_title("Frontera eficiente y estrategias comparadas")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        st.pyplot(fig2)
+        plt.close(fig2)
 
     with st.expander("📖 Interpretación – Frontera eficiente de Markowitz"):
-        st.markdown("""
+        st.markdown(
+            """
             **Interpretación analítica de la frontera eficiente:**
 
-            La **nube de puntos** representa 2,500 portafolios con pesos aleatorios.
-            El color indica el Ratio de Sharpe: colores más claros (amarillo) = mayor eficiencia.
+            La frontera eficiente representa el conjunto de portafolios
+            óptimos que maximizan el retorno esperado para cada nivel
+            de riesgo asumido, de acuerdo con la teoría media–varianza
+            de Markowitz.
 
-            La **línea continua** es la frontera eficiente: el conjunto de portafolios que no pueden
-            mejorar simultáneamente en retorno y riesgo. Los portafolios por debajo y a la derecha
-            son ineficientes porque existe siempre una alternativa mejor.
+            - Cada punto de la curva corresponde a una combinación
+              distinta de activos que no puede ser mejorada simultáneamente
+              en términos de mayor retorno y menor riesgo.
+            - Los portafolios situados por debajo de la frontera son
+              ineficientes, ya que existe al menos una alternativa
+              con mejor desempeño riesgo–retorno.
 
-            - **Sharpe Máximo** se ubica en el punto de mayor eficiencia riesgo–retorno.
-            - **Mínima Volatilidad** se posiciona en el extremo izquierdo de menor riesgo.
-            - **Pesos Iguales** actúa como referencia neutral sin optimización.
-        """)
+            La ubicación de las estrategias analizadas sobre la frontera
+            permite identificar su perfil:
+            - El portafolio de **Sharpe Máximo** se sitúa en una zona de
+              mayor eficiencia, priorizando la rentabilidad ajustada
+              por riesgo.
+            - La estrategia de **Mínima Volatilidad** se posiciona en el
+              extremo de menor riesgo, sacrificando retorno esperado.
+            - La asignación de **Pesos Iguales** actúa como referencia
+              neutral, sin optimización explícita.
+
+            Esta visualización facilita la comprensión del trade-off
+            riesgo–retorno y constituye una herramienta central para
+            la toma de decisiones de inversión.
+            """
+        )
 
     # =====================================================================
-    # RESUMEN FINAL
+    # RESUMEN FINAL DE TABLAS
     # =====================================================================
     st.subheader("Comparación de estrategias")
     st.dataframe(r["df_compare"])
@@ -1038,14 +1219,21 @@ if st.session_state.analysis_done:
     st.dataframe(r["df_weights"])
 
     df_retornos = pd.DataFrame(
-        {"Retorno anual esperado": [r["retornos"]["Sharpe Máximo"], r["retornos"]["Mínima Volatilidad"], r["retornos"]["Pesos Iguales"]]},
+        {
+            "Retorno anual esperado": [
+                r["retornos"]["Sharpe Máximo"],
+                r["retornos"]["Mínima Volatilidad"],
+                r["retornos"]["Pesos Iguales"]
+            ]
+        },
         index=["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"]
     )
+
     st.subheader("Ratio / retorno esperado por estrategia")
     st.dataframe(df_retornos)
 
 # ======================================================
-# ASISTENTE INTELIGENTE (GEMINI)
+# ASISTENTE INTELIGENTE DEL PORTAFOLIO (GEMINI)
 # ======================================================
 st.divider()
 st.subheader("🤖 Asistente inteligente del portafolio")
@@ -1054,11 +1242,12 @@ if not st.session_state.analysis_done:
     st.info("Ejecuta primero la optimización para habilitar el asistente.")
 else:
     GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+
     if not GEMINI_API_KEY:
         st.warning("El asistente requiere una API Key válida de Gemini.")
         st.stop()
 
-    MODEL      = "gemini-2.5-flash-lite"
+    MODEL = "gemini-2.5-flash-lite"
     GEMINI_URL = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{MODEL}:generateContent?key={GEMINI_API_KEY}"
@@ -1068,24 +1257,37 @@ else:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    user_question = st.chat_input("Pregunta sobre los tickers, riesgos o el portafolio recomendado")
+    user_question = st.chat_input(
+        "Pregunta sobre los tickers, riesgos o el portafolio recomendado"
+    )
 
     if user_question:
-        st.session_state.chat_messages.append({"role": "user", "content": user_question})
+        st.session_state.chat_messages.append(
+            {"role": "user", "content": user_question}
+        )
         with st.chat_message("user"):
             st.markdown(user_question)
 
-        results       = st.session_state.analysis_results
+        results = st.session_state.analysis_results
+
         best_strategy = results["best"]
         weights_dict  = results["weights"][best_strategy]
 
-        weights_text  = "\n".join(f"- {k}: {v:.2%}" for k, v in weights_dict.items())
-        asset_text    = "\n".join(
-            f"- {k}: retorno anual={v['retorno_anual']:.2%}, volatilidad={v['volatilidad']:.2%}"
+        weights_text = "\n".join(
+            f"- {k}: {v:.2%}" for k, v in weights_dict.items()
+        )
+
+        asset_text = "\n".join(
+            f"- {k}: retorno anual={v['retorno_anual']:.2%}, "
+            f"volatilidad={v['volatilidad']:.2%}"
             for k, v in results["asset_summary"].items()
         )
+
         strategy_text = "\n".join(
-            f"- {k}: retorno={v['retorno']:.2%}, volatilidad={v['volatilidad']:.2%}, Sharpe={v['sharpe']:.2f}, drawdown={v['drawdown']:.2%}"
+            f"- {k}: retorno={v['retorno']:.2%}, "
+            f"volatilidad={v['volatilidad']:.2%}, "
+            f"Sharpe={v['sharpe']:.2f}, "
+            f"drawdown={v['drawdown']:.2%}"
             for k, v in results["strategy_summary"].items()
         )
 
@@ -1094,10 +1296,13 @@ Actúa como un analista financiero profesional.
 
 CONTEXTO (úsalo solo si es necesario):
 Activos analizados: {', '.join(results['tickers'])}
+
 Resumen de activos:
 {asset_text}
+
 Resumen de estrategias:
 {strategy_text}
+
 Estrategia recomendada: {best_strategy}
 Pesos del portafolio recomendado:
 {weights_text}
@@ -1107,29 +1312,50 @@ INSTRUCCIONES ESTRICTAS:
 - Usa lenguaje claro para personas no técnicas.
 - La respuesta DEBE tener al menos 2 párrafos cortos.
 - Máximo 4 párrafos en total.
+- Cada párrafo debe aportar información distinta (no repetir ideas).
 - No expliques teoría financiera innecesaria.
+- Si aplica, menciona brevemente riesgo y retorno.
 - Si preguntan por cifras, usa números concretos.
 - No inventes datos.
 - Termina siempre la respuesta.
 """
 
         payload = {
-            "contents": [{"role": "user", "parts": [{"text": system_prompt + "\n\nPregunta del usuario:\n" + user_question}]}],
-            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 900}
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": system_prompt
+                            + "\n\nPregunta del usuario:\n"
+                            + user_question
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 900
+            }
         }
 
         response = requests.post(GEMINI_URL, json=payload)
+
         if response.status_code != 200:
             answer = "⚠️ Error al generar la respuesta con Gemini."
         else:
-            data   = response.json()
+            data = response.json()
             answer = (
                 data.get("candidates", [{}])[0]
-                .get("content", {}).get("parts", [{}])[0]
+                .get("content", {})
+                .get("parts", [{}])[0]
                 .get("text", "No se obtuvo respuesta.")
             )
 
-        st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+        st.session_state.chat_messages.append(
+            {"role": "assistant", "content": answer}
+        )
+
         with st.chat_message("assistant"):
             st.markdown(answer)
 
