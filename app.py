@@ -845,19 +845,49 @@ if st.session_state.analysis_done:
         st.subheader("Estabilidad de pesos por horizonte temporal")
         st.dataframe(r["df_stability"], use_container_width=True)
 
-        with st.expander("📖 Interpretación – Estabilidad de pesos por periodo"):
-            st.markdown("""
-                **Interpretación analítica de la estabilidad de pesos:**
-
-                Esta tabla muestra cómo cambian los pesos óptimos cuando se re-optimiza
-                con ventanas históricas de 3, 5 y todos los años disponibles.
-
-                - Pesos **similares entre horizontes** → estrategia robusta y confiable.
-                - Pesos **muy variables** → mayor sensibilidad al periodo de entrenamiento.
-
-                En una defensa técnica, la estabilidad de pesos es un argumento clave:
-                demuestra que la solución no es un artefacto del periodo de datos.
-            """)
+    with st.expander("📖 Interpretación – Estabilidad de pesos por horizonte temporal"):
+        st.markdown("""
+            **¿Qué muestra esta tabla?**
+    
+            Esta tabla re-optimiza el portafolio tres veces usando ventanas de tiempo
+            distintas: los últimos 3 años, los últimos 5 años y el periodo completo
+            seleccionado. El objetivo es verificar si los pesos óptimos cambian mucho
+            o poco dependiendo del periodo de datos utilizado.
+    
+            **¿Por qué es importante?**
+    
+            Uno de los problemas más conocidos del modelo de Markowitz es que sus
+            resultados pueden ser muy sensibles al periodo de datos elegido. Si los
+            pesos óptimos cambian drásticamente según la ventana de tiempo, significa
+            que el modelo está aprovechando patrones históricos específicos que podrían
+            no repetirse en el futuro. Esto se conoce como **sobreajuste** y es una
+            señal de alerta.
+    
+            **¿Cómo interpretar los resultados?**
+    
+            - Si los pesos de un activo son **similares en los tres horizontes**
+              (por ejemplo, siempre entre 20% y 25%), la estrategia es **robusta y
+              confiable**. El modelo llega a la misma conclusión sin importar qué
+              periodo se analice.
+            - Si los pesos varían **de forma significativa** entre horizontes (por
+              ejemplo, 5% en 3 años pero 45% en el periodo completo), la asignación
+              es **inestable**. Esto indica que ese activo tuvo un comportamiento
+              atípico en algún periodo puntual que distorsiona el resultado.
+            - Los pesos de **Sharpe Máximo** tienden a ser más inestables que los de
+              **Mínima Volatilidad**, ya que el Sharpe depende tanto del retorno como
+              de la volatilidad, dos variables que cambian más en el tiempo.
+    
+            **Lectura recomendada para la defensa técnica:**
+    
+            Si los pesos son estables entre horizontes, esto demuestra que la solución
+            no es un artefacto del periodo de datos elegido, sino una señal consistente
+            del mercado. Es uno de los argumentos más sólidos para defender la validez
+            del modelo frente a críticas metodológicas.
+    
+            Si existen variaciones importantes, se recomienda priorizar la estrategia de
+            **Mínima Volatilidad**, que tiende a producir asignaciones más estables y
+            predecibles a lo largo del tiempo.
+        """)
 
     # =====================================================================
     # COVID 2020
@@ -1345,6 +1375,7 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
