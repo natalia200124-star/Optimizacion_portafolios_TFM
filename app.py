@@ -21,9 +21,9 @@ RISK_FREE_RATE = 0.045  # T-Bill 3 meses ~4.5%
 # PALETA DE COLORES COMPARTIDA
 # =========================
 COLORS = {
-    "sharpe":  "#00d9ff",   # cian
-    "minvol":  "#66ffb2",   # verde menta
-    "equal":   "#ff9966",   # naranja suave
+    "sharpe":  "#00d9ff",
+    "minvol":  "#66ffb2",
+    "equal":   "#ff9966",
     "bg":      "#0f1419",
     "panel":   "#1a1f2e",
     "border":  "#00d9ff30",
@@ -174,6 +174,8 @@ st.markdown("""
 
 # =========================
 # SESSION STATE
+# CORRECCIÓN: se añade years_used para desacoplar el slider
+# de los resultados ya calculados, evitando recargas al moverlo.
 # =========================
 if "analysis_done" not in st.session_state:
     st.session_state.analysis_done = False
@@ -181,6 +183,9 @@ if "analysis_results" not in st.session_state:
     st.session_state.analysis_results = None
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []
+if "years_used" not in st.session_state:
+    # Valor por defecto igual al valor inicial del slider
+    st.session_state.years_used = 6
 
 
 @st.cache_data(show_spinner="Descargando datos y optimizando portafolio…")
@@ -559,6 +564,20 @@ tickers_input = st.text_input(
 
 years = st.slider("Seleccione el horizonte temporal (años)", min_value=3, max_value=10, value=6)
 
+# =========================
+# CORRECCIÓN DOBLE RECARGA + SLIDER:
+#
+# 1. Se elimina st.rerun() al final del bloque del botón.
+#    Streamlit ya re-renderiza automáticamente al detectar que
+#    session_state cambió durante la misma ejecución del script,
+#    por lo que el rerun() extra provocaba el segundo render visible.
+#
+# 2. Se guarda el valor de `years` en st.session_state.years_used
+#    en el momento exacto de la optimización. Así, mover el slider
+#    después no afecta el título ni los resultados mostrados,
+#    porque el bloque de resultados lee years_used (fijo) en lugar
+#    de years (que cambia con el slider).
+# =========================
 if st.button("Ejecutar optimización"):
     tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
     if len(tickers) < 2:
@@ -568,8 +587,10 @@ if st.button("Ejecutar optimización"):
             resultado = cargar_y_optimizar(tuple(tickers), years)
             st.session_state.analysis_results = resultado
             st.session_state.analysis_done    = True
+            st.session_state.years_used       = years   # ← guarda el horizonte usado
             st.session_state.chat_messages    = []
-            st.rerun()
+            # ← sin st.rerun(): Streamlit re-renderiza solo al ver
+            #   que session_state cambió, evitando la doble recarga.
         except ValueError as e:
             st.error(str(e))
         except Exception as e:
@@ -601,7 +622,9 @@ if st.session_state.analysis_done:
     else:
         st.dataframe(precios_2025, use_container_width=True)
 
-    st.subheader(f"Tendencia de precios (últimos {years} años)")
+    # CORRECCIÓN: usa years_used (fijo al momento del análisis) en lugar
+    # de years (que cambia al mover el slider y causaba rerenders).
+    st.subheader(f"Tendencia de precios (últimos {st.session_state.years_used} años)")
     st.line_chart(data)
 
     with st.expander("📖 Interpretación – Tendencia de precios"):
@@ -848,23 +871,23 @@ if st.session_state.analysis_done:
     with st.expander("📖 Interpretación – Estabilidad de pesos por horizonte temporal"):
         st.markdown("""
             **¿Qué muestra esta tabla?**
-    
+
             Esta tabla re-optimiza el portafolio tres veces usando ventanas de tiempo
             distintas: los últimos 3 años, los últimos 5 años y el periodo completo
             seleccionado. El objetivo es verificar si los pesos óptimos cambian mucho
             o poco dependiendo del periodo de datos utilizado.
-    
+
             **¿Por qué es importante?**
-    
+
             Uno de los problemas más conocidos del modelo de Markowitz es que sus
             resultados pueden ser muy sensibles al periodo de datos elegido. Si los
             pesos óptimos cambian drásticamente según la ventana de tiempo, significa
             que el modelo está aprovechando patrones históricos específicos que podrían
             no repetirse en el futuro. Esto se conoce como **sobreajuste** y es una
             señal de alerta.
-    
+
             **¿Cómo interpretar los resultados?**
-    
+
             - Si los pesos de un activo son **similares en los tres horizontes**
               (por ejemplo, siempre entre 20% y 25%), la estrategia es **robusta y
               confiable**. El modelo llega a la misma conclusión sin importar qué
@@ -876,14 +899,14 @@ if st.session_state.analysis_done:
             - Los pesos de **Sharpe Máximo** tienden a ser más inestables que los de
               **Mínima Volatilidad**, ya que el Sharpe depende tanto del retorno como
               de la volatilidad, dos variables que cambian más en el tiempo.
-    
+
             **Lectura recomendada para la defensa técnica:**
-    
+
             Si los pesos son estables entre horizontes, esto demuestra que la solución
             no es un artefacto del periodo de datos elegido, sino una señal consistente
             del mercado. Es uno de los argumentos más sólidos para defender la validez
             del modelo frente a críticas metodológicas.
-    
+
             Si existen variaciones importantes, se recomienda priorizar la estrategia de
             **Mínima Volatilidad**, que tiende a producir asignaciones más estables y
             predecibles a lo largo del tiempo.
@@ -1035,7 +1058,7 @@ if st.session_state.analysis_done:
     st.success(f"Portafolio recomendado según comportamiento real ponderado: {best}")
 
     # =====================================================================
-    # PESOS ÓPTIMOS — sin línea de pesos iguales
+    # PESOS ÓPTIMOS
     # =====================================================================
     st.subheader("Pesos óptimos del portafolio recomendado")
 
@@ -1375,6 +1398,7 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
