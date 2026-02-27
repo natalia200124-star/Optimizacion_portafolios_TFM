@@ -247,9 +247,9 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         irx_close = irx_raw["Adj Close"] if "Adj Close" in irx_raw.columns else irx_raw["Close"]
         irx_close = irx_close.dropna()
         # ^IRX cotiza en puntos porcentuales → dividir entre 100
-        RISK_FREE_RATE = float(irx_close.mean()) / 100.0
+        rf_historical_mean = float(irx_close.mean()) / 100.0
     except Exception:
-        RISK_FREE_RATE = 0.045   # fallback si Yahoo no devuelve datos
+        rf_historical_mean = RISK_FREE_RATE   # fallback si Yahoo no devuelve datos
 
     # =====================================================================
     # 2) RETORNOS LOGARÍTMICOS + LEDOIT-WOLF
@@ -267,14 +267,17 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # =====================================================================
     # 3) FUNCIONES DE OPTIMIZACIÓN
     # =====================================================================
-    def performance(weights, mean_ret, cov):
+    def performance(weights, mean_ret, cov, rf=None):
+        if rf is None:
+            rf = rf_historical_mean
         ret    = np.dot(weights, mean_ret)
         vol    = np.sqrt(weights.T @ cov @ weights)
-        sharpe = (ret - RISK_FREE_RATE) / vol if vol > 0 else 0
+        sharpe = (ret - rf) / vol if vol > 0 else 0
         return ret, vol, sharpe
 
     def neg_sharpe(weights):
-        ret, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
+        ret, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual,
+                                           rf=rf_historical_mean)
         penalty = LAMBDA_REG * np.sum(weights ** 2)
         return -(sharpe - penalty) if vol_val > 0 else 1e6
 
@@ -293,14 +296,17 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # =====================================================================
     res_sharpe     = minimize(neg_sharpe, x0, method="SLSQP", bounds=bounds, constraints=constraints)
     weights_sharpe = res_sharpe.x
-    ret_sharpe, vol_sharpe, sharpe_sharpe = performance(weights_sharpe, mean_returns_annual, cov_annual)
+    ret_sharpe, vol_sharpe, sharpe_sharpe = performance(
+        weights_sharpe, mean_returns_annual, cov_annual, rf=rf_historical_mean)
 
     res_minvol     = minimize(vol_obj, x0, method="SLSQP", bounds=bounds, constraints=constraints)
     weights_minvol = res_minvol.x
-    ret_minvol, vol_minvol, sharpe_minvol = performance(weights_minvol, mean_returns_annual, cov_annual)
+    ret_minvol, vol_minvol, sharpe_minvol = performance(
+        weights_minvol, mean_returns_annual, cov_annual, rf=rf_historical_mean)
 
     weights_equal = np.repeat(1 / n, n)
-    ret_equal, vol_equal, sharpe_equal = performance(weights_equal, mean_returns_annual, cov_annual)
+    ret_equal, vol_equal, sharpe_equal = performance(
+        weights_equal, mean_returns_annual, cov_annual, rf=rf_historical_mean)
 
     # =====================================================================
     # 5) RENDIMIENTOS ACUMULADOS
@@ -337,7 +343,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         )
         res = minimize(vol_obj, x0, method="SLSQP", bounds=bounds, constraints=cons)
         if res.success:
-            r, v, _ = performance(res.x, mean_returns_annual, cov_annual)
+            r, v, _ = performance(res.x, mean_returns_annual, cov_annual, rf=rf_historical_mean)
             efficient_rets.append(r)
             efficient_vols.append(v)
 
@@ -346,7 +352,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     rand_w         = np.random.dirichlet(np.ones(n), size=n_random)
     rand_rets      = rand_w @ mean_returns_annual.values
     rand_vols      = np.array([np.sqrt(w @ cov_annual.values @ w) for w in rand_w])
-    rand_sharpes   = (rand_rets - RISK_FREE_RATE) / rand_vols
+    rand_sharpes   = (rand_rets - rf_historical_mean) / rand_vols
 
     # =====================================================================
     # 8) TABLAS DE MÉTRICAS
@@ -374,7 +380,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     def sortino_ratio(ret_anual, daily_ret):
         downside     = np.minimum(daily_ret, 0)
         downside_dev = np.sqrt((downside**2).mean()) * np.sqrt(252)
-        return (ret_anual - RISK_FREE_RATE) / downside_dev if downside_dev > 0 else np.nan
+        return (ret_anual - rf_historical_mean) / downside_dev if downside_dev > 0 else np.nan
 
     df_sortino = pd.DataFrame({
         "Estrategia": ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
@@ -466,7 +472,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         con = {"type": "eq", "fun": lambda w: np.sum(w)-1}
         def ns_(w):
             r_ = np.dot(w, mr); v_ = np.sqrt(w.T @ cov_ @ w)
-            sh = (r_ - RISK_FREE_RATE)/v_ if v_ > 0 else 0
+            sh = (r_ - rf_historical_mean)/v_ if v_ > 0 else 0
             return -(sh - LAMBDA_REG*np.sum(w**2)) if v_ > 0 else 1e6
         def vo_(w):
             return np.sqrt(w.T @ cov_ @ w) + LAMBDA_REG*np.sum(w**2)
@@ -555,7 +561,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         },
         "retornos":     {"Sharpe Máximo": ret_sharpe, "Mínima Volatilidad": ret_minvol, "Pesos Iguales": ret_equal},
         "volatilidades":{"Sharpe Máximo": vol_sharpe, "Mínima Volatilidad": vol_minvol, "Pesos Iguales": vol_equal},
-        "risk_free_rate": RISK_FREE_RATE,
+        "risk_free_rate": rf_historical_mean,
     }
 
 
