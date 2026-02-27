@@ -13,9 +13,11 @@ import os
 from sklearn.covariance import LedoitWolf
 
 # =========================
-# RISK_FREE_RATE fuera de la función cacheada
+# RISK_FREE_RATE — valor de respaldo estático.
+# Dentro de cargar_y_optimizar se sobrescribe con el promedio
+# histórico real descargado de Yahoo Finance (^IRX).
 # =========================
-RISK_FREE_RATE = 0.045  # T-Bill 3 meses ~4.5%
+RISK_FREE_RATE = 0.045  # fallback: T-Bill 3 meses ~4.5%
 
 # =========================
 # PALETA DE COLORES COMPARTIDA
@@ -200,14 +202,12 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 1) DESCARGA DE DATOS
-    # *** CAMBIO 1: se añade "^IRX" a all_tickers para descargarlo
-    #     en la misma llamada y evitar una petición extra a Yahoo Finance.
     # =====================================================================
     end_date   = datetime.today()
     start_date = end_date.replace(year=end_date.year - years)
 
     benchmark_tickers = ["SPY", "QQQ", "URTH"]
-    all_tickers = tickers + benchmark_tickers + ["^IRX"]   # ← CAMBIO 1
+    all_tickers = tickers + benchmark_tickers
 
     raw_data = yf.download(
         all_tickers, start=start_date, end=end_date,
@@ -217,14 +217,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     if isinstance(raw_data.columns, pd.MultiIndex):
         raw_data = raw_data.droplevel(0, axis=1)
     raw_data = raw_data.sort_index().ffill()
-
-    # *** CAMBIO 2: calcular la tasa histórica real promedio del periodo
-    #     ^IRX cotiza en puntos porcentuales (ej. 4.5 = 4,5 %) → dividir / 100.
-    #     Se usa RISK_FREE_RATE global como fallback si no hay datos de ^IRX.
-    rf_series = raw_data["^IRX"].dropna() / 100
-    rf_historical_mean = float(rf_series.mean()) if not rf_series.empty else RISK_FREE_RATE
-    # Quitar ^IRX del dataframe para que no interfiera con los demás cálculos
-    raw_data = raw_data.drop(columns=["^IRX"], errors="ignore")   # ← fin CAMBIO 2
 
     data           = raw_data[tickers].copy()
     benchmark_data = raw_data[benchmark_tickers].copy()
@@ -241,6 +233,25 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         raise ValueError("No hay datos suficientes para el periodo seleccionado.")
 
     # =====================================================================
+    # 1.1) TASA LIBRE DE RIESGO HISTÓRICA REAL (^IRX)
+    # ^IRX = rendimiento anualizado del T-Bill 13 semanas, expresado en %
+    # (p. ej. 4.5 significa 4,5 %). Se descarga el mismo periodo que los
+    # activos, se calcula el promedio y se convierte a decimal.
+    # Si la descarga falla se usa el valor de respaldo global (0.045).
+    # =====================================================================
+    try:
+        irx_raw = yf.download(
+            "^IRX", start=start_date, end=end_date,
+            auto_adjust=False, progress=False
+        )
+        irx_close = irx_raw["Adj Close"] if "Adj Close" in irx_raw.columns else irx_raw["Close"]
+        irx_close = irx_close.dropna()
+        # ^IRX cotiza en puntos porcentuales → dividir entre 100
+        RISK_FREE_RATE = float(irx_close.mean()) / 100.0
+    except Exception:
+        RISK_FREE_RATE = 0.045   # fallback si Yahoo no devuelve datos
+
+    # =====================================================================
     # 2) RETORNOS LOGARÍTMICOS + LEDOIT-WOLF
     # =====================================================================
     returns            = np.log(data / data.shift(1)).dropna()
@@ -255,18 +266,15 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 3) FUNCIONES DE OPTIMIZACIÓN
-    # *** CAMBIO 3a: performance() acepta rf= como parámetro explícito.
-    #     Por defecto usa RISK_FREE_RATE global para no romper otras llamadas.
     # =====================================================================
-    def performance(weights, mean_ret, cov, rf=RISK_FREE_RATE):   # ← CAMBIO 3a
+    def performance(weights, mean_ret, cov):
         ret    = np.dot(weights, mean_ret)
         vol    = np.sqrt(weights.T @ cov @ weights)
-        sharpe = (ret - rf) / vol if vol > 0 else 0               # ← CAMBIO 3a
+        sharpe = (ret - RISK_FREE_RATE) / vol if vol > 0 else 0
         return ret, vol, sharpe
 
     def neg_sharpe(weights):
-        ret, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual,
-                                           rf=rf_historical_mean)  # ← CAMBIO 3b
+        ret, vol_val, sharpe = performance(weights, mean_returns_annual, cov_annual)
         penalty = LAMBDA_REG * np.sum(weights ** 2)
         return -(sharpe - penalty) if vol_val > 0 else 1e6
 
@@ -282,22 +290,17 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 4) OPTIMIZACIONES
-    # *** CAMBIO 3c: pasar rf=rf_historical_mean en los 3 calls a performance()
-    #     que calculan las métricas históricas de cada estrategia.
     # =====================================================================
     res_sharpe     = minimize(neg_sharpe, x0, method="SLSQP", bounds=bounds, constraints=constraints)
     weights_sharpe = res_sharpe.x
-    ret_sharpe, vol_sharpe, sharpe_sharpe = performance(
-        weights_sharpe, mean_returns_annual, cov_annual, rf=rf_historical_mean)   # ← CAMBIO 3c
+    ret_sharpe, vol_sharpe, sharpe_sharpe = performance(weights_sharpe, mean_returns_annual, cov_annual)
 
     res_minvol     = minimize(vol_obj, x0, method="SLSQP", bounds=bounds, constraints=constraints)
     weights_minvol = res_minvol.x
-    ret_minvol, vol_minvol, sharpe_minvol = performance(
-        weights_minvol, mean_returns_annual, cov_annual, rf=rf_historical_mean)   # ← CAMBIO 3c
+    ret_minvol, vol_minvol, sharpe_minvol = performance(weights_minvol, mean_returns_annual, cov_annual)
 
     weights_equal = np.repeat(1 / n, n)
-    ret_equal, vol_equal, sharpe_equal = performance(
-        weights_equal, mean_returns_annual, cov_annual, rf=rf_historical_mean)    # ← CAMBIO 3c
+    ret_equal, vol_equal, sharpe_equal = performance(weights_equal, mean_returns_annual, cov_annual)
 
     # =====================================================================
     # 5) RENDIMIENTOS ACUMULADOS
@@ -334,7 +337,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         )
         res = minimize(vol_obj, x0, method="SLSQP", bounds=bounds, constraints=cons)
         if res.success:
-            r, v, _ = performance(res.x, mean_returns_annual, cov_annual, rf=rf_historical_mean)
+            r, v, _ = performance(res.x, mean_returns_annual, cov_annual)
             efficient_rets.append(r)
             efficient_vols.append(v)
 
@@ -343,7 +346,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     rand_w         = np.random.dirichlet(np.ones(n), size=n_random)
     rand_rets      = rand_w @ mean_returns_annual.values
     rand_vols      = np.array([np.sqrt(w @ cov_annual.values @ w) for w in rand_w])
-    rand_sharpes   = (rand_rets - rf_historical_mean) / rand_vols   # ← CAMBIO 3d (Sitio 1)
+    rand_sharpes   = (rand_rets - RISK_FREE_RATE) / rand_vols
 
     # =====================================================================
     # 8) TABLAS DE MÉTRICAS
@@ -371,7 +374,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     def sortino_ratio(ret_anual, daily_ret):
         downside     = np.minimum(daily_ret, 0)
         downside_dev = np.sqrt((downside**2).mean()) * np.sqrt(252)
-        return (ret_anual - rf_historical_mean) / downside_dev if downside_dev > 0 else np.nan  # ← CAMBIO 3e (Sitio 2)
+        return (ret_anual - RISK_FREE_RATE) / downside_dev if downside_dev > 0 else np.nan
 
     df_sortino = pd.DataFrame({
         "Estrategia": ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
@@ -463,7 +466,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         con = {"type": "eq", "fun": lambda w: np.sum(w)-1}
         def ns_(w):
             r_ = np.dot(w, mr); v_ = np.sqrt(w.T @ cov_ @ w)
-            sh = (r_ - rf_historical_mean)/v_ if v_ > 0 else 0   # ← CAMBIO 3f (Sitio 3)
+            sh = (r_ - RISK_FREE_RATE)/v_ if v_ > 0 else 0
             return -(sh - LAMBDA_REG*np.sum(w**2)) if v_ > 0 else 1e6
         def vo_(w):
             return np.sqrt(w.T @ cov_ @ w) + LAMBDA_REG*np.sum(w**2)
@@ -551,7 +554,8 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
             "Pesos Iguales":    dict(zip(tickers, weights_equal))
         },
         "retornos":     {"Sharpe Máximo": ret_sharpe, "Mínima Volatilidad": ret_minvol, "Pesos Iguales": ret_equal},
-        "volatilidades":{"Sharpe Máximo": vol_sharpe, "Mínima Volatilidad": vol_minvol, "Pesos Iguales": vol_equal}
+        "volatilidades":{"Sharpe Máximo": vol_sharpe, "Mínima Volatilidad": vol_minvol, "Pesos Iguales": vol_equal},
+        "risk_free_rate": RISK_FREE_RATE,
     }
 
 
@@ -1326,6 +1330,9 @@ if st.session_state.analysis_done:
     st.subheader("Ratio / retorno esperado por estrategia")
     st.dataframe(df_retornos)
 
+    # Tasa libre de riesgo utilizada en el análisis
+    st.info(f"📌 Tasa libre de riesgo utilizada (^IRX promedio del periodo): **{r['risk_free_rate']:.4%}**")
+
 # ======================================================
 # ASISTENTE INTELIGENTE (GEMINI)
 # ======================================================
@@ -1416,6 +1423,7 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
