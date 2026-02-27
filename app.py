@@ -207,7 +207,9 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     start_date = end_date.replace(year=end_date.year - years)
 
     benchmark_tickers = ["SPY", "QQQ", "URTH"]
-    all_tickers = tickers + benchmark_tickers
+    # ^IRX se incluye en la misma descarga masiva para evitar una
+    # segunda peticion HTTP. Se extrae y elimina antes de los calculos.
+    all_tickers = tickers + benchmark_tickers + ["^IRX"]
 
     raw_data = yf.download(
         all_tickers, start=start_date, end=end_date,
@@ -217,6 +219,18 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     if isinstance(raw_data.columns, pd.MultiIndex):
         raw_data = raw_data.droplevel(0, axis=1)
     raw_data = raw_data.sort_index().ffill()
+
+    # =====================================================================
+    # 1.1) TASA LIBRE DE RIESGO HISTORICA REAL (^IRX)
+    # ^IRX = rendimiento anualizado del T-Bill 13 semanas, expresado en %
+    # (p. ej. 4.5 significa 4,5 %). Viene incluido en el batch anterior.
+    # ^IRX cotiza en puntos porcentuales (ej. 4.5 = 4.5%) -> dividir / 100.
+    # Se usa RISK_FREE_RATE como fallback si la serie viene vacia.
+    # =====================================================================
+    irx_series = raw_data["^IRX"].dropna() / 100 if "^IRX" in raw_data.columns else pd.Series(dtype=float)
+    rf_historical_mean = float(irx_series.mean()) if not irx_series.empty else RISK_FREE_RATE
+    # Eliminar ^IRX para que no interfiera con los calculos del portafolio
+    raw_data = raw_data.drop(columns=["^IRX"], errors="ignore")
 
     data           = raw_data[tickers].copy()
     benchmark_data = raw_data[benchmark_tickers].copy()
@@ -231,25 +245,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     benchmark_data = benchmark_data.ffill().dropna()
     if data.empty:
         raise ValueError("No hay datos suficientes para el periodo seleccionado.")
-
-    # =====================================================================
-    # 1.1) TASA LIBRE DE RIESGO HISTÓRICA REAL (^IRX)
-    # ^IRX = rendimiento anualizado del T-Bill 13 semanas, expresado en %
-    # (p. ej. 4.5 significa 4,5 %). Se descarga el mismo periodo que los
-    # activos, se calcula el promedio y se convierte a decimal.
-    # Si la descarga falla se usa el valor de respaldo global (0.045).
-    # =====================================================================
-    try:
-        irx_raw = yf.download(
-            "^IRX", start=start_date, end=end_date,
-            auto_adjust=False, progress=False
-        )
-        irx_close = irx_raw["Adj Close"] if "Adj Close" in irx_raw.columns else irx_raw["Close"]
-        irx_close = irx_close.dropna()
-        # ^IRX cotiza en puntos porcentuales → dividir entre 100
-        rf_historical_mean = float(irx_close.mean()) / 100.0
-    except Exception:
-        rf_historical_mean = RISK_FREE_RATE   # fallback si Yahoo no devuelve datos
 
     # =====================================================================
     # 2) RETORNOS LOGARÍTMICOS + LEDOIT-WOLF
@@ -1429,6 +1424,7 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
