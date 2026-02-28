@@ -752,14 +752,6 @@ if st.session_state.analysis_done:
     r = st.session_state.analysis_results
 
     # =====================================================================
-    # ADVERTENCIAS DE OPTIMIZACIÓN
-    # Se muestran aquí (fuera de @st.cache_data) las advertencias recogidas
-    # durante el proceso de optimización. En condiciones normales con datos
-    # suficientes y activos diversificados, esta sección estará vacía.
-    # =====================================================================
-    for warn_msg in r.get("optimization_warnings", []):
-        st.warning(warn_msg)
-
     data         = r["data"]
     returns      = r["returns"]
     tickers      = r["tickers"]
@@ -1367,15 +1359,6 @@ if st.session_state.analysis_done:
     # =====================================================================
     st.subheader("Frontera eficiente (Retorno vs Volatilidad)")
 
-    # Aviso de frontera incompleta si aplica (Error 1)
-    if r["frontier_failures"] > r["frontier_total"] * 0.30:
-        st.warning(
-            f"⚠️ La frontera eficiente está incompleta: {r['frontier_failures']} de "
-            f"{r['frontier_total']} puntos no pudieron calcularse debido a restricciones "
-            f"de peso (MAX_WEIGHT = {min(0.80, max(2.0/len(tickers), 0.10)):.0%}). "
-            f"La curva es válida pero puede no cubrir todo el rango posible de retornos."
-        )
-
     _fe1, _fe2, _fe3 = st.columns([0.2, 3, 0.2])
     with _fe2:
         fig_fe, ax_fe = plt.subplots(figsize=(10, 6))
@@ -1584,6 +1567,7 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
