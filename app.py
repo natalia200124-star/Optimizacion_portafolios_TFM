@@ -204,6 +204,10 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # activo con n=20 (sin justificación). Nuevo piso: max(2/n, 0.10).
     MAX_WEIGHT    = min(0.80, max(2.0 / n, 0.10))
 
+    # Lista de avisos para mostrar en la UI (no podemos llamar st.warning
+    # dentro de @st.cache_data, se retornan y se muestran fuera).
+    optimization_warnings = []
+
     # =====================================================================
     # 1) DESCARGA DE DATOS
     # =====================================================================
@@ -226,16 +230,11 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     # 1.1) TASA LIBRE DE RIESGO DIARIA VARIABLE (^IRX)
     # ^IRX cotiza como tasa anualizada en % (ej. 4.5 = 4.5% anual).
     # Conversión a tasa DIARIA equivalente: (IRX/100) / 252
-    # FIX MENOR — Se elimina el reindex intermedio a freq="B" que era
-    # redundante: el reindex definitivo ocurre sobre returns.index
-    # (calendario real de trading), por lo que el paso a días hábiles
-    # genéricos no aportaba nada y añadía complejidad innecesaria.
     # =====================================================================
     if "^IRX" in raw_data.columns:
         irx_raw = raw_data["^IRX"] / 100 / 252   # tasa diaria
         irx_raw = irx_raw.replace(0, np.nan).ffill().bfill()
         rf_historical_mean = float(irx_raw.dropna().mean() * 252)  # anual
-        # Serie guardada directamente; se alineará sobre returns.index
         rf_daily_series = irx_raw
     else:
         rf_daily_series    = None
@@ -300,20 +299,47 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     def max_drawdown(series):
         return ((series / series.cummax()) - 1).min()
 
+    # FIX CALMAR — Guardia contra drawdown nulo (imposible con datos reales
+    # pero posible en periodos muy cortos donde nunca hay caída).
+    def safe_calmar(ret, dd):
+        return ret / abs(dd) if dd != 0 else np.nan
+
     x0          = np.repeat(1 / n, n)
     bounds      = tuple((0, MAX_WEIGHT) for _ in range(n))
     constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
 
     # =====================================================================
     # 4) OPTIMIZACIONES
+    # FIX CONVERGENCIA — Si SLSQP no converge, res.x es el último iterado
+    # y puede no cumplir las restricciones (pesos que no suman 1).
+    # Se añade fallback a pesos iguales para garantizar que los pesos
+    # entregados siempre sumen 1 y sean válidos. Las advertencias se
+    # acumulan en optimization_warnings y se muestran en la UI.
     # =====================================================================
-    res_sharpe     = minimize(neg_sharpe, x0, method="SLSQP", bounds=bounds, constraints=constraints)
-    weights_sharpe = res_sharpe.x
+    res_sharpe = minimize(neg_sharpe, x0, method="SLSQP", bounds=bounds, constraints=constraints)
+    if res_sharpe.success:
+        weights_sharpe = res_sharpe.x
+    else:
+        weights_sharpe = x0.copy()
+        optimization_warnings.append(
+            "⚠️ La optimización de **Sharpe Máximo** no convergió. "
+            "Se usaron pesos iguales como alternativa. "
+            "Esto puede ocurrir con activos muy correlacionados o periodos de datos muy cortos."
+        )
+
     ret_sharpe, vol_sharpe, sharpe_sharpe = performance(
         weights_sharpe, mean_returns_annual, cov_annual, rf=rf_historical_mean)
 
-    res_minvol     = minimize(vol_obj, x0, method="SLSQP", bounds=bounds, constraints=constraints)
-    weights_minvol = res_minvol.x
+    res_minvol = minimize(vol_obj, x0, method="SLSQP", bounds=bounds, constraints=constraints)
+    if res_minvol.success:
+        weights_minvol = res_minvol.x
+    else:
+        weights_minvol = x0.copy()
+        optimization_warnings.append(
+            "⚠️ La optimización de **Mínima Volatilidad** no convergió. "
+            "Se usaron pesos iguales como alternativa."
+        )
+
     ret_minvol, vol_minvol, sharpe_minvol = performance(
         weights_minvol, mean_returns_annual, cov_annual, rf=rf_historical_mean)
 
@@ -346,9 +372,14 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # 6) FRONTERA EFICIENTE + NUBE DE PORTAFOLIOS ALEATORIOS
+    # FIX FRONTERA — Se cuenta el número de puntos que SLSQP no resuelve.
+    # Si hay muchos fallos, el usuario recibe un aviso en la UI explicando
+    # que la frontera puede estar incompleta y por qué.
     # =====================================================================
     target_returns = np.linspace(mean_returns_annual.min(), mean_returns_annual.max(), 50)
     efficient_vols, efficient_rets = [], []
+    frontier_failures = 0
+
     for targ in target_returns:
         cons = (
             {"type": "eq", "fun": lambda w: np.sum(w) - 1},
@@ -359,6 +390,18 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
             r, v, _ = performance(res.x, mean_returns_annual, cov_annual, rf=rf_historical_mean)
             efficient_rets.append(r)
             efficient_vols.append(v)
+        else:
+            frontier_failures += 1
+
+    # Si más del 30% de los puntos de la frontera fallaron, se genera aviso.
+    if frontier_failures > len(target_returns) * 0.30:
+        optimization_warnings.append(
+            f"⚠️ La frontera eficiente está incompleta: {frontier_failures} de "
+            f"{len(target_returns)} puntos no pudieron calcularse. "
+            f"Esto suele ocurrir cuando MAX_WEIGHT ({MAX_WEIGHT:.0%}) es demasiado "
+            f"restrictivo para alcanzar ciertos niveles de retorno con los activos seleccionados. "
+            f"La curva mostrada es válida pero puede no cubrir todo el rango de retornos posibles."
+        )
 
     np.random.seed(0)
     n_random       = 2500
@@ -388,9 +431,14 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "Pesos Iguales":      daily_equal.rolling(roll_window).std()  * np.sqrt(252)
     })
 
+    # FIX CALMAR — Guardia contra drawdown nulo (usa safe_calmar definida arriba).
     df_calmar = pd.DataFrame({
         "Estrategia": ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
-        "Calmar": [ret_sharpe/abs(dd_sharpe), ret_minvol/abs(dd_minvol), ret_equal/abs(dd_equal)]
+        "Calmar": [
+            safe_calmar(ret_sharpe, dd_sharpe),
+            safe_calmar(ret_minvol, dd_minvol),
+            safe_calmar(ret_equal,  dd_equal),
+        ]
     })
 
     def sortino_ratio(ret_anual, daily_ret):
@@ -422,11 +470,10 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     sim_minvol_mc = sim_assets_mc @ weights_minvol
     sim_equal_mc  = sim_assets_mc @ weights_equal
 
-    # FIX 5 — Bootstrap vectorizado: reemplaza el loop Python de 5000
-    # iteraciones por indexación avanzada numpy (~20x más rápido).
-    # Cada simulación muestrea n_blocks_per_sim bloques de tamaño block_size
-    # de forma independiente, construyendo un tensor (N_sim, 252, n_activos)
-    # sin ningún loop Python explícito. Resultado estadísticamente idéntico.
+    # FIX BOOTSTRAP VECTORIZADO + OFF-BY-ONE:
+    # rng.integers(low, high) excluye `high`, por lo que sin el +1 el último
+    # bloque válido (start = n_obs - block_size) nunca se muestrea,
+    # sesgando sutilmente las simulaciones.
     n_obs            = len(returns)
     block_size       = 20
     n_blocks_per_sim = int(np.ceil(trading_days / block_size))
@@ -434,7 +481,8 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     def _bootstrap_portfolio_fast(weights_vec, seed_offset=0):
         rng    = np.random.default_rng(42 + seed_offset)
-        starts = rng.integers(0, n_obs - block_size,
+        # +1 corrige el off-by-one: integers(low, high) excluye high
+        starts = rng.integers(0, n_obs - block_size + 1,
                               size=(N_SIMULATIONS, n_blocks_per_sim))
         # Índices día a día: (N_SIMULATIONS, n_blocks_per_sim, block_size)
         idx = starts[:, :, None] + np.arange(block_size)[None, None, :]
@@ -500,6 +548,8 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # ESTABILIDAD DE PESOS
+    # FIX CONVERGENCIA EN VENTANA — Se añade fallback a pesos iguales si
+    # SLSQP no converge en alguna de las sub-ventanas de análisis.
     # =====================================================================
     def optimizar_en_ventana(ret_v):
         mr  = ret_v.mean() * trading_days
@@ -515,8 +565,10 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
             return -(sh - LAMBDA_REG*np.sum(w**2)) if v_ > 0 else 1e6
         def vo_(w):
             return np.sqrt(w.T @ cov_ @ w) + LAMBDA_REG*np.sum(w**2)
-        ws = minimize(ns_, x0_, method="SLSQP", bounds=bds, constraints=con).x
-        wm = minimize(vo_, x0_, method="SLSQP", bounds=bds, constraints=con).x
+        res_s = minimize(ns_, x0_, method="SLSQP", bounds=bds, constraints=con)
+        res_v = minimize(vo_, x0_, method="SLSQP", bounds=bds, constraints=con)
+        ws = res_s.x if res_s.success else x0_.copy()
+        wm = res_v.x if res_v.success else x0_.copy()
         return ws, wm
 
     stability_rows = []
@@ -536,15 +588,22 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     # =====================================================================
     # SÍNTESIS — MEJOR PORTAFOLIO
-    # FIX 7 — Criterio de selección corregido.
-    # PROBLEMA ANTERIOR: sharpe_scores usaba sharpe_sharpe/minvol/equal,
-    # pero sharpe_sharpe SIEMPRE es el mayor por construcción matemática
-    # (neg_sharpe lo maximiza). Resultado: "Sharpe Máximo" ganaba el 100%
-    # de las veces sin importar los datos — comparación completamente inútil.
-    # SOLUCIÓN: weighted_performance evalúa el retorno acumulado REAL de
-    # cada estrategia ponderando más los años recientes. Este criterio
-    # puede elegir cualquiera de las tres estrategias según los datos,
-    # y es coherente con la literatura de evaluación de fondos.
+    # FIX WEIGHTED_PERFORMANCE — Corrección doble:
+    #
+    # PROBLEMA 1 (bug): El bloque anterior usaba .mul(weights_series).iloc[-1],
+    # que tomaba solo la ÚLTIMA FILA del DataFrame multiplicado. Como esa fila
+    # siempre cae en el año más reciente (peso = 1.0), la ponderación por año
+    # no tenía efecto real: equivalía a elegir por retorno acumulado total.
+    #
+    # PROBLEMA 2 (Error 3): El criterio anterior solo consideraba retorno,
+    # ignorando el riesgo. Una estrategia con alto retorno reciente pero
+    # drawdowns severos podía ser seleccionada sobre una más estable.
+    #
+    # SOLUCIÓN: Se calcula el RATIO DE SHARPE anual de cada estrategia por
+    # año natural, usando la RF variable por año, y se promedian con pesos
+    # crecientes (años recientes pesan más). Esto implementa correctamente
+    # la ponderación temporal Y ajusta por riesgo simultáneamente.
+    # Cualquiera de las tres estrategias puede ganar según los datos.
     # =====================================================================
     asset_summary = {}
     for ticker in tickers:
@@ -560,18 +619,37 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "Pesos Iguales":    {"retorno": ret_equal,  "volatilidad": vol_equal,  "sharpe": sharpe_equal,  "drawdown": dd_equal}
     }
 
-    df_strategies  = pd.DataFrame({
+    df_strategies = pd.DataFrame({
         "Sharpe Máximo":      daily_sharpe,
         "Mínima Volatilidad": daily_minvol,
         "Pesos Iguales":      daily_equal
     })
-    years_index    = df_strategies.index.year
-    unique_years   = np.sort(years_index.unique())
-    year_weights   = {y: (i+1)/len(unique_years) for i, y in enumerate(unique_years)}
-    weights_series = years_index.map(year_weights)
-    weighted_performance = (
-        np.exp(df_strategies.cumsum()).mul(weights_series, axis=0).iloc[-1]
-    )
+
+    # Retorno logarítmico total por año natural para cada estrategia
+    annual_log_returns = df_strategies.groupby(df_strategies.index.year).sum()
+
+    # Volatilidad anualizada por año natural
+    annual_vol = df_strategies.groupby(df_strategies.index.year).std() * np.sqrt(trading_days)
+
+    # Tasa libre de riesgo anualizada por año (promedio de la serie diaria × 252)
+    rf_annual_by_year = rf_daily.groupby(rf_daily.index.year).mean() * trading_days
+    # Alinear al mismo índice de años que las estrategias
+    rf_annual_by_year = rf_annual_by_year.reindex(annual_log_returns.index).ffill().bfill()
+
+    # Sharpe anual por estrategia por año:
+    # (retorno_log_anual - rf_anual) / vol_anual
+    # Se usa retorno log anual como aproximación del retorno aritmético anual
+    # (diferencia < 2% en carteras diversificadas, consistente con el resto del código)
+    annual_sharpe = annual_log_returns.sub(rf_annual_by_year, axis=0).div(annual_vol)
+    # Reemplazar NaN/Inf que puedan surgir si vol == 0 en algún año
+    annual_sharpe = annual_sharpe.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    # Pesos crecientes: año más antiguo recibe 1/n_años, más reciente recibe 1.0
+    n_years = len(annual_sharpe)
+    year_w  = np.arange(1, n_years + 1) / n_years   # shape (n_years,)
+
+    # Promedio ponderado del Sharpe anual: criterio ajustado por riesgo + recencia
+    weighted_performance = (annual_sharpe * year_w[:, None]).mean()
     best = weighted_performance.idxmax()
 
     if best == "Sharpe Máximo":
@@ -602,6 +680,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "df_stability": df_stability, "df_benchmarks": df_benchmarks, "comparison_cum": comparison_cum,
         "weighted_performance": weighted_performance, "best": best, "metodo": metodo, "df_weights": df_weights,
         "efficient_vols": efficient_vols, "efficient_rets": efficient_rets,
+        "frontier_failures": frontier_failures, "frontier_total": len(target_returns),
         "rand_vols": rand_vols, "rand_rets": rand_rets, "rand_sharpes": rand_sharpes,
         "vol_sharpe": vol_sharpe, "ret_sharpe": ret_sharpe,
         "vol_minvol": vol_minvol, "ret_minvol": ret_minvol,
@@ -615,6 +694,8 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "retornos":     {"Sharpe Máximo": ret_sharpe, "Mínima Volatilidad": ret_minvol, "Pesos Iguales": ret_equal},
         "volatilidades":{"Sharpe Máximo": vol_sharpe, "Mínima Volatilidad": vol_minvol, "Pesos Iguales": vol_equal},
         "risk_free_rate": rf_historical_mean,
+        # Lista de advertencias de optimización para mostrar en la UI
+        "optimization_warnings": optimization_warnings,
     }
 
 
@@ -669,6 +750,15 @@ if st.button("Ejecutar optimización"):
 if st.session_state.analysis_done:
 
     r = st.session_state.analysis_results
+
+    # =====================================================================
+    # ADVERTENCIAS DE OPTIMIZACIÓN
+    # Se muestran aquí (fuera de @st.cache_data) las advertencias recogidas
+    # durante el proceso de optimización. En condiciones normales con datos
+    # suficientes y activos diversificados, esta sección estará vacía.
+    # =====================================================================
+    for warn_msg in r.get("optimization_warnings", []):
+        st.warning(warn_msg)
 
     data         = r["data"]
     returns      = r["returns"]
@@ -1096,19 +1186,19 @@ if st.session_state.analysis_done:
 
     # =====================================================================
     # MEJOR PORTAFOLIO
-    # FIX 7 (UI) — Se reemplaza la tabla sharpe_scores (que siempre mostraba
-    # Sharpe Máximo como ganador por ser tautológica) por weighted_performance,
-    # que refleja el desempeño acumulado real ponderado por años recientes.
+    # El criterio ahora usa Sharpe ponderado por recencia (no solo retorno),
+    # ajustando por riesgo y evitando seleccionar estrategias con alto
+    # retorno pero drawdowns severos.
     # =====================================================================
     st.subheader("Interpretación automática del mejor portafolio")
-    st.dataframe(r["weighted_performance"].rename("Desempeño_Ponderado"))
+    st.dataframe(r["weighted_performance"].rename("Sharpe_Ponderado_Recencia"))
 
     if best == "Pesos Iguales":
         st.markdown(
             "### Mejor portafolio: Pesos Iguales\n\n"
-            "El análisis del **comportamiento real del portafolio en el tiempo**, "
-            "ponderando más los años recientes, muestra que esta estrategia ha sido "
-            "la **más robusta y consistente**.\n\n"
+            "El análisis del **Ratio de Sharpe anual ponderado por recencia** "
+            "muestra que esta estrategia ha sido la **más robusta y consistente** "
+            "en términos de retorno ajustado por riesgo.\n\n"
             "- Menor dependencia de supuestos estadísticos.\n"
             "- Mejor desempeño agregado a lo largo del tiempo.\n"
             "- Alta estabilidad frente a cambios de mercado."
@@ -1116,17 +1206,18 @@ if st.session_state.analysis_done:
     elif best == "Sharpe Máximo":
         st.markdown(
             "### Mejor portafolio: Sharpe Máximo\n\n"
-            "La evaluación temporal indica que esta estrategia ofrece el mejor "
-            "equilibrio riesgo–retorno en el comportamiento histórico reciente."
+            "El análisis del Ratio de Sharpe anual ponderando más los años recientes "
+            "indica que esta estrategia ofrece el mejor equilibrio riesgo–retorno "
+            "en el comportamiento histórico reciente."
         )
     else:
         st.markdown(
             "### Mejor portafolio: Mínima Volatilidad\n\n"
-            "Esta estrategia destaca por su estabilidad, aunque sacrifica retorno "
-            "frente a las demás."
+            "El análisis del Ratio de Sharpe ponderado por recencia muestra que "
+            "esta estrategia destaca por su estabilidad y eficiencia ajustada por riesgo."
         )
 
-    st.success(f"Portafolio recomendado según comportamiento real ponderado: {best}")
+    st.success(f"Portafolio recomendado según Sharpe ponderado por recencia: {best}")
 
     # =====================================================================
     # PESOS ÓPTIMOS
@@ -1275,6 +1366,15 @@ if st.session_state.analysis_done:
     # FRONTERA EFICIENTE — GRÁFICO PREMIUM
     # =====================================================================
     st.subheader("Frontera eficiente (Retorno vs Volatilidad)")
+
+    # Aviso de frontera incompleta si aplica (Error 1)
+    if r["frontier_failures"] > r["frontier_total"] * 0.30:
+        st.warning(
+            f"⚠️ La frontera eficiente está incompleta: {r['frontier_failures']} de "
+            f"{r['frontier_total']} puntos no pudieron calcularse debido a restricciones "
+            f"de peso (MAX_WEIGHT = {min(0.80, max(2.0/len(tickers), 0.10)):.0%}). "
+            f"La curva es válida pero puede no cubrir todo el rango posible de retornos."
+        )
 
     _fe1, _fe2, _fe3 = st.columns([0.2, 3, 0.2])
     with _fe2:
@@ -1484,6 +1584,7 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
