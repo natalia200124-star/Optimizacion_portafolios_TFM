@@ -392,17 +392,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
             efficient_vols.append(v)
         else:
             frontier_failures += 1
-
-    # Si más del 30% de los puntos de la frontera fallaron, se genera aviso.
-    if frontier_failures > len(target_returns) * 0.30:
-        optimization_warnings.append(
-            f"⚠️ La frontera eficiente está incompleta: {frontier_failures} de "
-            f"{len(target_returns)} puntos no pudieron calcularse. "
-            f"Esto suele ocurrir cuando MAX_WEIGHT ({MAX_WEIGHT:.0%}) es demasiado "
-            f"restrictivo para alcanzar ciertos niveles de retorno con los activos seleccionados. "
-            f"La curva mostrada es válida pero puede no cubrir todo el rango de retornos posibles."
-        )
-
+    
     np.random.seed(0)
     n_random       = 2500
     rand_w         = np.random.dirichlet(np.ones(n), size=n_random)
@@ -751,7 +741,6 @@ if st.session_state.analysis_done:
 
     r = st.session_state.analysis_results
 
-    # =====================================================================
     data         = r["data"]
     returns      = r["returns"]
     tickers      = r["tickers"]
@@ -1567,6 +1556,8 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
+
 
 
 
