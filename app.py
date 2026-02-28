@@ -511,7 +511,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         cov_ = pd.DataFrame(lw_.covariance_ * trading_days, index=ret_v.columns, columns=ret_v.columns)
         n_  = len(ret_v.columns)
         x0_ = np.repeat(1/n_, n_)
-        bds = tuple((0, min(0.80, max(2.0/n_, 0.40))) for _ in range(n_))
+        bds = tuple((0, min(0.80, max(2.0/n_, 0.10))) for _ in range(n_))
         con = {"type": "eq", "fun": lambda w: np.sum(w)-1}
         def ns_(w):
             r_ = np.dot(w, mr); v_ = np.sqrt(w.T @ cov_ @ w)
@@ -1479,6 +1479,7 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
