@@ -176,8 +176,6 @@ st.markdown("""
 
 # =========================
 # SESSION STATE
-# CORRECCIÓN: se añade years_used para desacoplar el slider
-# de los resultados ya calculados, evitando recargas al moverlo.
 # =========================
 if "analysis_done" not in st.session_state:
     st.session_state.analysis_done = False
@@ -186,19 +184,25 @@ if "analysis_results" not in st.session_state:
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []
 if "years_used" not in st.session_state:
-    # Valor por defecto igual al valor inicial del slider
     st.session_state.years_used = 6
 
 
 @st.cache_data(show_spinner="Descargando datos y optimizando portafolio…")
 def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
-    tickers = list(tickers_tuple)
+    # FIX 1 — Deduplicar tickers: columnas duplicadas en la matriz de
+    # covarianza causan fallos silenciosos en la optimización SLSQP.
+    seen = set(); tickers = []
+    for t in tickers_tuple:
+        if t not in seen:
+            seen.add(t); tickers.append(t)
     n = len(tickers)
 
     LAMBDA_REG    = 0.01
     N_SIMULATIONS = 5000
-    MAX_WEIGHT    = min(0.80, max(2.0 / n, 0.40))
+    # FIX 2 — MAX_WEIGHT: el piso original de 0.40 permite 40% en un solo
+    # activo con n=20 (sin justificación). Nuevo piso: max(2/n, 0.10).
+    MAX_WEIGHT    = min(0.80, max(2.0 / n, 0.10))
 
     # =====================================================================
     # 1) DESCARGA DE DATOS
@@ -207,8 +211,6 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     start_date = end_date.replace(year=end_date.year - years)
 
     benchmark_tickers = ["SPY", "QQQ", "URTH"]
-    # ^IRX se incluye en la misma descarga masiva para evitar una
-    # segunda peticion HTTP. Se extrae y elimina antes de los calculos.
     all_tickers = tickers + benchmark_tickers + ["^IRX"]
 
     raw_data = yf.download(
@@ -221,15 +223,27 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     raw_data = raw_data.sort_index().ffill()
 
     # =====================================================================
-    # 1.1) TASA LIBRE DE RIESGO HISTORICA REAL (^IRX)
-    # ^IRX = rendimiento anualizado del T-Bill 13 semanas, expresado en %
-    # (p. ej. 4.5 significa 4,5 %). Viene incluido en el batch anterior.
-    # ^IRX cotiza en puntos porcentuales (ej. 4.5 = 4.5%) -> dividir / 100.
-    # Se usa RISK_FREE_RATE como fallback si la serie viene vacia.
+    # 1.1) TASA LIBRE DE RIESGO DIARIA VARIABLE (^IRX)
+    # ^IRX cotiza como tasa anualizada en % (ej. 4.5 = 4.5% anual).
+    # Conversión a tasa DIARIA equivalente: (IRX/100) / 252
+    # Se construye una Serie diaria alineada con el índice de returns,
+    # rellenando huecos con ffill (fines de semana/feriados) y usando
+    # el fallback estático solo si ^IRX no está disponible en absoluto.
+    # Esta serie variable es matemáticamente más correcta que un escalar
+    # promedio porque el Sharpe ex-post y el Sortino se calculan día a día.
     # =====================================================================
-    irx_series = raw_data["^IRX"].dropna() / 100 if "^IRX" in raw_data.columns else pd.Series(dtype=float)
-    rf_historical_mean = float(irx_series.mean()) if not irx_series.empty else RISK_FREE_RATE
-    # Eliminar ^IRX para que no interfiera con los calculos del portafolio
+    if "^IRX" in raw_data.columns:
+        irx_raw = raw_data["^IRX"] / 100 / 252   # tasa diaria
+        irx_raw = irx_raw.replace(0, np.nan).ffill().bfill()
+        rf_fallback_daily = RISK_FREE_RATE / 252
+        rf_daily_series = irx_raw.reindex(
+            pd.date_range(raw_data.index.min(), raw_data.index.max(), freq="B")
+        ).ffill().bfill().fillna(rf_fallback_daily)
+        rf_historical_mean = float((irx_raw.dropna()).mean() * 252)  # anual, para optimización
+    else:
+        rf_daily_series    = None   # se construye después de calcular returns
+        rf_historical_mean = RISK_FREE_RATE
+
     raw_data = raw_data.drop(columns=["^IRX"], errors="ignore")
 
     data           = raw_data[tickers].copy()
@@ -253,6 +267,18 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     mean_returns_daily = returns.mean()
     trading_days       = 252
     mean_returns_annual = mean_returns_daily * trading_days
+
+    # Alinear rf_daily_series con el índice exacto de returns.
+    # Si ^IRX no estaba disponible se construye escalar constante.
+    if rf_daily_series is not None:
+        rf_daily = rf_daily_series.reindex(returns.index).ffill().bfill()
+        rf_daily = rf_daily.fillna(RISK_FREE_RATE / trading_days)
+    else:
+        rf_daily = pd.Series(RISK_FREE_RATE / trading_days, index=returns.index)
+
+    # Tasa anual efectiva media (usada en la optimización y en métricas anuales)
+    # Si se sobreescribió arriba no cambia; si ^IRX falló, usamos el fallback.
+    # rf_historical_mean ya tiene la tasa anual correcta en ambos casos.
 
     lw = LedoitWolf()
     lw.fit(returns)
@@ -347,7 +373,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     rand_w         = np.random.dirichlet(np.ones(n), size=n_random)
     rand_rets      = rand_w @ mean_returns_annual.values
     rand_vols      = np.array([np.sqrt(w @ cov_annual.values @ w) for w in rand_w])
-    rand_sharpes   = (rand_rets - rf_historical_mean) / rand_vols
+    rand_sharpes   = (rand_rets - rf_historical_mean) / rand_vols  # rf anual promedio variable
 
     # =====================================================================
     # 8) TABLAS DE MÉTRICAS
@@ -361,10 +387,13 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "Máx Drawdown":     [dd_sharpe, dd_minvol, dd_equal]
     })
 
+    # FIX 4 — Ventana adaptativa: con years=3 (~756 días) la ventana fija
+    # de 252 deja el primer tercio como NaN. Se adapta: min(252, n_días/3).
+    roll_window = max(21, min(252, len(returns) // 3))
     rolling_vol = pd.DataFrame({
-        "Sharpe Máximo":      daily_sharpe.rolling(252).std() * np.sqrt(252),
-        "Mínima Volatilidad": daily_minvol.rolling(252).std() * np.sqrt(252),
-        "Pesos Iguales":      daily_equal.rolling(252).std()  * np.sqrt(252)
+        "Sharpe Máximo":      daily_sharpe.rolling(roll_window).std() * np.sqrt(252),
+        "Mínima Volatilidad": daily_minvol.rolling(roll_window).std() * np.sqrt(252),
+        "Pesos Iguales":      daily_equal.rolling(roll_window).std()  * np.sqrt(252)
     })
 
     df_calmar = pd.DataFrame({
@@ -373,9 +402,12 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     })
 
     def sortino_ratio(ret_anual, daily_ret):
-        downside     = np.minimum(daily_ret, 0)
-        downside_dev = np.sqrt((downside**2).mean()) * np.sqrt(252)
-        return (ret_anual - rf_historical_mean) / downside_dev if downside_dev > 0 else np.nan
+        # Exceso de retorno diario respecto a la tasa libre variable
+        excess       = daily_ret - rf_daily.reindex(daily_ret.index).ffill().bfill()
+        downside     = np.minimum(excess, 0)
+        downside_dev = np.sqrt((downside ** 2).mean()) * np.sqrt(trading_days)
+        rf_annual    = float(rf_daily.mean() * trading_days)
+        return (ret_anual - rf_annual) / downside_dev if downside_dev > 0 else np.nan
 
     df_sortino = pd.DataFrame({
         "Estrategia": ["Sharpe Máximo", "Mínima Volatilidad", "Pesos Iguales"],
@@ -398,17 +430,27 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
     sim_minvol_mc = sim_assets_mc @ weights_minvol
     sim_equal_mc  = sim_assets_mc @ weights_equal
 
+    # FIX 5 — Bootstrap correcto: el código original apilaba todos los
+    # bloques en una matriz y hacía reshape arbitrario, cortando a mitad
+    # de bloque y destruyendo la estructura temporal. Implementación
+    # correcta: cada simulación muestrea bloques de forma INDEPENDIENTE.
+    rng_boot   = np.random.default_rng(42)
     n_obs      = len(returns)
     block_size = 20
-    n_blocks   = (N_SIMULATIONS * trading_days) // block_size + 1
-    starts     = np.random.randint(0, n_obs - block_size, size=n_blocks)
-    boot_rows  = [returns.iloc[s:s+block_size].values for s in starts]
-    boot_ret   = np.vstack(boot_rows)[:N_SIMULATIONS * trading_days]
-    boot_ret   = boot_ret.reshape(N_SIMULATIONS, trading_days, n)
+    n_blocks_per_sim = int(np.ceil(trading_days / block_size))
+    ret_matrix = returns.values
 
-    sim_sharpe_boot = (boot_ret @ weights_sharpe).sum(axis=1)
-    sim_minvol_boot = (boot_ret @ weights_minvol).sum(axis=1)
-    sim_equal_boot  = (boot_ret @ weights_equal).sum(axis=1)
+    def _bootstrap_portfolio(weights_vec):
+        out = np.empty(N_SIMULATIONS)
+        for i in range(N_SIMULATIONS):
+            starts_i = rng_boot.integers(0, n_obs - block_size, size=n_blocks_per_sim)
+            sim_days = np.vstack([ret_matrix[s:s+block_size] for s in starts_i])[:trading_days]
+            out[i]   = (sim_days @ weights_vec).sum()
+        return out
+
+    sim_sharpe_boot = _bootstrap_portfolio(weights_sharpe)
+    sim_minvol_boot = _bootstrap_portfolio(weights_minvol)
+    sim_equal_boot  = _bootstrap_portfolio(weights_equal)
 
     def var_cvar(s, alpha=0.05):
         v = np.percentile(s, alpha*100)
@@ -448,10 +490,16 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         })
     df_benchmarks = pd.DataFrame(benchmark_summary)
 
+    # FIX 3 — Alinear índices portafolio/benchmark: distintos feriados
+    # producen NaNs silenciosos en el DataFrame combinado.
+    common_idx = cum_sharpe.index.intersection(benchmark_cum.index)
     comparison_cum = pd.DataFrame({
-        "Sharpe Máximo": cum_sharpe, "Mínima Volatilidad": cum_minvol, "Pesos Iguales": cum_equal,
-        "S&P 500 (SPY)": benchmark_cum["SPY"], "Nasdaq 100 (QQQ)": benchmark_cum["QQQ"],
-        "MSCI World (URTH)": benchmark_cum["URTH"]
+        "Sharpe Máximo":      cum_sharpe.reindex(common_idx),
+        "Mínima Volatilidad": cum_minvol.reindex(common_idx),
+        "Pesos Iguales":      cum_equal.reindex(common_idx),
+        "S&P 500 (SPY)":      benchmark_cum["SPY"].reindex(common_idx),
+        "Nasdaq 100 (QQQ)":   benchmark_cum["QQQ"].reindex(common_idx),
+        "MSCI World (URTH)":  benchmark_cum["URTH"].reindex(common_idx),
     })
 
     # =====================================================================
@@ -476,7 +524,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         return ws, wm
 
     stability_rows = []
-    for horizon in [3, 5, years]:
+    for horizon in sorted(set([3, 5, years])):  # FIX 6 — sin duplicados si years=3 o 5
         cutoff  = returns.index[-1] - pd.DateOffset(years=horizon)
         ret_sub = returns[returns.index >= cutoff]
         if len(ret_sub) < 252:
@@ -507,15 +555,17 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "Pesos Iguales":    {"retorno": ret_equal,  "volatilidad": vol_equal,  "sharpe": sharpe_equal,  "drawdown": dd_equal}
     }
 
-    df_strategies    = pd.DataFrame({"Sharpe Máximo": daily_sharpe, "Mínima Volatilidad": daily_minvol, "Pesos Iguales": daily_equal})
-    years_index      = df_strategies.index.year
-    unique_years     = np.sort(years_index.unique())
-    year_weights     = {y: (i+1)/len(unique_years) for i, y in enumerate(unique_years)}
-    weights_series   = years_index.map(year_weights)
-    weighted_performance = (
-        np.exp(df_strategies.cumsum()).mul(weights_series, axis=0).iloc[-1]
-    )
-    best = weighted_performance.idxmax()
+    # FIX 7 — Criterio de selección: Ratio de Sharpe histórico.
+    # La métrica original multiplicaba retornos acumulados por pesos
+    # lineales de año, sesgando artificialmente hacia rendimiento reciente.
+    # No es una métrica reconocida en la literatura académica.
+    # Se reemplaza por el Sharpe histórico, estándar en gestión de portafolios.
+    sharpe_scores = {
+        "Sharpe Máximo":      sharpe_sharpe,
+        "Mínima Volatilidad": sharpe_minvol,
+        "Pesos Iguales":      sharpe_equal,
+    }
+    best = max(sharpe_scores, key=sharpe_scores.get)
 
     if best == "Sharpe Máximo":
         final_weights = weights_sharpe; metodo = "Optimización por Ratio de Sharpe"
@@ -530,6 +580,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
 
     return {
         "tickers": tickers, "data": data, "returns": returns,
+        "rf_daily": rf_daily,                                          # serie diaria variable
         "cumulative_assets": cumulative_assets,
         "daily_sharpe": daily_sharpe, "daily_minvol": daily_minvol, "daily_equal": daily_equal,
         "cum_sharpe": cum_sharpe, "cum_minvol": cum_minvol, "cum_equal": cum_equal,
@@ -542,7 +593,7 @@ def cargar_y_optimizar(tickers_tuple: tuple, years: int):
         "mc_var_bt":   {"Sharpe Máximo": vs_bt, "Mínima Volatilidad": vm_bt, "Pesos Iguales": ve_bt},
         "mc_cvar_bt":  {"Sharpe Máximo": cs_bt, "Mínima Volatilidad": cm_bt, "Pesos Iguales": ce_bt},
         "df_stability": df_stability, "df_benchmarks": df_benchmarks, "comparison_cum": comparison_cum,
-        "weighted_performance": weighted_performance, "best": best, "metodo": metodo, "df_weights": df_weights,
+        "sharpe_scores": sharpe_scores, "best": best, "metodo": metodo, "df_weights": df_weights,
         "efficient_vols": efficient_vols, "efficient_rets": efficient_rets,
         "rand_vols": rand_vols, "rand_rets": rand_rets, "rand_sharpes": rand_sharpes,
         "vol_sharpe": vol_sharpe, "ret_sharpe": ret_sharpe,
@@ -587,22 +638,13 @@ tickers_input = st.text_input(
 
 years = st.slider("Seleccione el horizonte temporal (años)", min_value=3, max_value=10, value=6)
 
-# =========================
-# CORRECCIÓN DOBLE RECARGA + SLIDER:
-#
-# 1. Se elimina st.rerun() al final del bloque del botón.
-#    Streamlit ya re-renderiza automáticamente al detectar que
-#    session_state cambió durante la misma ejecución del script,
-#    por lo que el rerun() extra provocaba el segundo render visible.
-#
-# 2. Se guarda el valor de `years` en st.session_state.years_used
-#    en el momento exacto de la optimización. Así, mover el slider
-#    después no afecta el título ni los resultados mostrados,
-#    porque el bloque de resultados lee years_used (fijo) en lugar
-#    de years (que cambia con el slider).
-# =========================
 if st.button("Ejecutar optimización"):
-    tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+    tickers_raw = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+    # FIX 10 — Advertir duplicados al usuario antes de procesar
+    duplicados = [t for t in set(tickers_raw) if tickers_raw.count(t) > 1]
+    if duplicados:
+        st.warning(f"Tickers duplicados detectados: {', '.join(set(duplicados))}. Se eliminarán automáticamente.")
+    tickers = list(dict.fromkeys(tickers_raw))  # deduplica preservando orden
     if len(tickers) < 2:
         st.error("Ingrese al menos 2 tickers.")
     else:
@@ -610,10 +652,8 @@ if st.button("Ejecutar optimización"):
             resultado = cargar_y_optimizar(tuple(tickers), years)
             st.session_state.analysis_results = resultado
             st.session_state.analysis_done    = True
-            st.session_state.years_used       = years   # ← guarda el horizonte usado
+            st.session_state.years_used       = years
             st.session_state.chat_messages    = []
-            # ← sin st.rerun(): Streamlit re-renderiza solo al ver
-            #   que session_state cambió, evitando la doble recarga.
         except ValueError as e:
             st.error(str(e))
         except Exception as e:
@@ -645,8 +685,6 @@ if st.session_state.analysis_done:
     else:
         st.dataframe(precios_2025, use_container_width=True)
 
-    # CORRECCIÓN: usa years_used (fijo al momento del análisis) en lugar
-    # de years (que cambia al mover el slider y causaba rerenders).
     st.subheader(f"Tendencia de precios (últimos {st.session_state.years_used} años)")
     st.line_chart(data)
 
@@ -666,9 +704,6 @@ if st.session_state.analysis_done:
             frente a otros con mayor variabilidad en el tiempo.
         """)
 
-    # =====================================================================
-    # COMPARACIÓN DE ESTRATEGIAS
-    # =====================================================================
     st.subheader("Comparación sistemática de estrategias")
     st.dataframe(r["df_compare"])
 
@@ -940,11 +975,14 @@ if st.session_state.analysis_done:
     # =====================================================================
     st.subheader("Comportamiento en periodo de crisis (COVID 2020)")
     crisis = (cum_sharpe.index.year == 2020)
-    st.line_chart(pd.DataFrame({
-        "Sharpe Máximo": cum_sharpe[crisis],
-        "Mínima Volatilidad": cum_minvol[crisis],
-        "Pesos Iguales": cum_equal[crisis]
-    }))
+    if crisis.sum() > 0:
+        st.line_chart(pd.DataFrame({
+            "Sharpe Máximo": cum_sharpe[crisis],
+            "Mínima Volatilidad": cum_minvol[crisis],
+            "Pesos Iguales": cum_equal[crisis]
+        }))
+    else:
+        st.info("El horizonte seleccionado no incluye datos de 2020.")
 
     with st.expander("📖 Interpretación – Comportamiento en crisis (COVID 2020)"):
         st.markdown("""
@@ -1053,7 +1091,12 @@ if st.session_state.analysis_done:
     # MEJOR PORTAFOLIO
     # =====================================================================
     st.subheader("Interpretación automática del mejor portafolio")
-    st.dataframe(r["weighted_performance"].rename("Desempeño_Ponderado"))
+    # Muestra los Sharpe históricos de cada estrategia (criterio real de selección)
+    sharpe_df = pd.DataFrame(
+        list(r["sharpe_scores"].items()),
+        columns=["Estrategia", "Ratio de Sharpe"]
+    ).sort_values("Ratio de Sharpe", ascending=False)
+    st.dataframe(sharpe_df, use_container_width=True)
 
     if best == "Pesos Iguales":
         st.markdown(
@@ -1331,8 +1374,11 @@ if st.session_state.analysis_done:
     st.subheader("Ratio / retorno esperado por estrategia")
     st.dataframe(df_retornos)
 
-    # Tasa libre de riesgo utilizada en el análisis
-    st.info(f"📌 Tasa libre de riesgo utilizada (^IRX promedio del periodo): **{r['risk_free_rate']:.4%}**")
+    st.info(
+        f"📌 Tasa libre de riesgo utilizada (^IRX, diaria variable — promedio anualizado del periodo): "
+        f"**{r['risk_free_rate']:.4%}**. "
+        f"El Sortino y el Sharpe ex-post se calculan con la tasa variable día a día."
+    )
 
 # ======================================================
 # ASISTENTE INTELIGENTE (GEMINI)
@@ -1343,7 +1389,13 @@ st.subheader("🤖 Asistente inteligente del portafolio")
 if not st.session_state.analysis_done:
     st.info("Ejecuta primero la optimización para habilitar el asistente.")
 else:
-    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+    # FIX 9 — st.secrets.get() lanza FileNotFoundError en local sin secrets.toml
+    GEMINI_API_KEY = None
+    try:
+        GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
+    except Exception:
+        pass
+    GEMINI_API_KEY = GEMINI_API_KEY or os.getenv("GEMINI_API_KEY")
     if not GEMINI_API_KEY:
         st.warning("El asistente requiere una API Key válida de Gemini.")
         st.stop()
@@ -1410,16 +1462,19 @@ INSTRUCCIONES ESTRICTAS:
             "generationConfig": {"temperature": 0.3, "maxOutputTokens": 900}
         }
 
-        response = requests.post(GEMINI_URL, json=payload)
-        if response.status_code != 200:
-            answer = "⚠️ Error al generar la respuesta con Gemini."
-        else:
+        try:
+            response = requests.post(GEMINI_URL, json=payload, timeout=30)
+            response.raise_for_status()
             data   = response.json()
             answer = (
                 data.get("candidates", [{}])[0]
                 .get("content", {}).get("parts", [{}])[0]
                 .get("text", "No se obtuvo respuesta.")
             )
+        except requests.exceptions.Timeout:
+            answer = "⚠️ El asistente tardó demasiado en responder. Inténtalo de nuevo."
+        except requests.exceptions.RequestException as e:
+            answer = f"⚠️ Error de conexión con Gemini: {e}"
 
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
