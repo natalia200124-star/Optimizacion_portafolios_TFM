@@ -1201,6 +1201,73 @@ if st.session_state.analysis_done:
     st.success(f"Portafolio recomendado según Sharpe ponderado por recencia: {best}")
 
     # =====================================================================
+    # MENSAJE DINÁMICO — Explica posible diferencia entre criterios
+    # Se genera automáticamente con los datos reales de cada análisis
+    # =====================================================================
+    strategy_data = r["strategy_summary"]
+    sharpe_mejor  = r["weighted_performance"].idxmax()
+    sharpe_teorico_ganador = max(
+        strategy_data, key=lambda k: strategy_data[k]["sharpe"]
+    )
+
+    if sharpe_mejor != sharpe_teorico_ganador:
+        # Datos reales para el mensaje
+        ret_teo  = strategy_data[sharpe_teorico_ganador]["retorno"]
+        vol_teo  = strategy_data[sharpe_teorico_ganador]["volatilidad"]
+        sh_teo   = strategy_data[sharpe_teorico_ganador]["sharpe"]
+        dd_teo   = strategy_data[sharpe_teorico_ganador]["drawdown"]
+
+        ret_rec  = strategy_data[sharpe_mejor]["retorno"]
+        vol_rec  = strategy_data[sharpe_mejor]["volatilidad"]
+        sh_rec   = strategy_data[sharpe_mejor]["sharpe"]
+        dd_rec   = strategy_data[sharpe_mejor]["drawdown"]
+
+        tickers_str = ", ".join(r["tickers"])
+        years_str   = st.session_state.years_used
+
+        with st.expander("ℹ️ ¿Por qué la recomendación difiere del análisis teórico? Haz clic para entender"):
+            st.markdown(f"""
+**Es normal que veas dos resultados distintos. Aquí te explicamos por qué:**
+
+El análisis de este portafolio con los activos **{tickers_str}** en los últimos **{years_str} años**
+produce dos perspectivas que miden cosas diferentes:
+
+---
+
+**📐 Perspectiva teórica (Frontera eficiente y Monte Carlo)**
+
+Calcula cuál estrategia tiene la mejor relación riesgo–retorno considerando
+**todo el periodo completo de {years_str} años** como si fuera un solo bloque.
+Bajo este criterio, **{sharpe_teorico_ganador}** resulta ganador con un
+retorno anual de **{ret_teo:.1%}**, volatilidad de **{vol_teo:.1%}**
+y un Ratio de Sharpe de **{sh_teo:.2f}**.
+
+---
+
+**📅 Perspectiva histórica reciente (criterio de selección)**
+
+Evalúa cómo se comportó cada estrategia **año por año**, dándole
+más importancia a los años recientes que a los más antiguos.
+Esta perspectiva muestra que **{sharpe_mejor}** fue más consistente
+en el periodo reciente, con retorno anual de **{ret_rec:.1%}**,
+volatilidad de **{vol_rec:.1%}** y Ratio de Sharpe de **{sh_rec:.2f}**.
+
+---
+
+**¿Cuál es la diferencia práctica?**
+
+La perspectiva teórica puede estar influenciada por periodos de muy
+alto rendimiento que ocurrieron hace años y que no necesariamente
+se repetirán. La perspectiva reciente captura mejor cómo se han
+comportado estos activos en condiciones de mercado más actuales.
+
+**Ambas son válidas.** Si buscas el máximo retorno ajustado por riesgo
+en el largo plazo histórico completo, elige **{sharpe_teorico_ganador}**.
+Si buscas la estrategia más consistente en el comportamiento reciente
+del mercado con estos activos, elige **{sharpe_mejor}**.
+""")
+
+    # =====================================================================
     # PESOS ÓPTIMOS
     # =====================================================================
     st.subheader("Pesos óptimos del portafolio recomendado")
@@ -1556,6 +1623,7 @@ INSTRUCCIONES ESTRICTAS:
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         with st.chat_message("assistant"):
             st.markdown(answer)
+
 
 
 
